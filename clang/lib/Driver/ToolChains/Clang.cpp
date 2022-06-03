@@ -4551,6 +4551,10 @@ renderDebugOptions(const ToolChain &TC, const Driver &D, const llvm::Triple &T,
   if (EmitCodeView && Output.isFilename())
     addDebugObjectName(Args, CmdArgs, DebugCompilationDir,
                        Output.getFilename());
+
+  bool EmitDwarfForAMDGCN = EmitDwarf && T.isAMDGCN();
+  if (EmitDwarfForAMDGCN)
+    CmdArgs.append({"-mllvm", "-amdgpu-spill-cfi-saved-regs"});
 }
 
 static void ProcessVSRuntimeLibrary(const ArgList &Args,
