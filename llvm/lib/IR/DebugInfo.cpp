@@ -868,6 +868,11 @@ unsigned llvm::getDebugMetadataVersionFromModule(const Module &M) {
   return 0;
 }
 
+bool llvm::isHeterogeneousDebug(const Module &M) {
+  return getDebugMetadataVersionFromModule(M) ==
+         DEBUG_METADATA_VERSION_HETEROGENEOUS_DWARF;
+}
+
 void Instruction::applyMergedLocation(DILocation *LocA, DILocation *LocB) {
   setDebugLoc(DILocation::getMergedLocation(LocA, LocB));
 }
