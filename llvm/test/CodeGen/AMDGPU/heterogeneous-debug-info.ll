@@ -1,20 +1,19 @@
 ; RUN: llc -O0 -stop-after=finalize-isel < %s | FileCheck --check-prefixes=COMMON,AFTER-ISEL %s
 ; RUN: llc -O0 -stop-after=regallocfast,1 < %s | FileCheck --check-prefixes=COMMON,AFTER-RA %s
-
+; RUN: llc -O0 -stop-after=prologepilog < %s | FileCheck --check-prefixes=COMMON,AFTER-PEI %s
 ; COMMON-DAG: ![[VAR_I:[0-9]+]] = !DILocalVariable(name: "I",
 ; COMMON-DAG: ![[VAR_R:[0-9]+]] = !DILocalVariable(name: "R",
-
 ; AFTER-ISEL-DAG: ![[ENTRY_LIFETIME_VAR_I:[0-9]+]] = distinct !DILifetime(object: ![[VAR_I]], location: !DIExpr(DIOpReferrer(i32)))
 ; AFTER-ISEL-DAG: ![[STACK_LIFETIME_VAR_I:[0-9]+]] = distinct !DILifetime(object: ![[VAR_I]], location: !DIExpr(DIOpReferrer(i32)))
 ; AFTER-ISEL-DAG: ![[STACK_LIFETIME_VAR_R:[0-9]+]] = distinct !DILifetime(object: ![[VAR_R]], location: !DIExpr(DIOpReferrer(i32)))
-
 ; AFTER-RA-DAG: ![[ENTRY_LIFETIME_VAR_I:[0-9]+]] = distinct !DILifetime(object: ![[VAR_I]], location: !DIExpr(DIOpReferrer(i32)))
 ; AFTER-RA-DAG: ![[STACK_LIFETIME_VAR_I:[0-9]+]] = distinct !DILifetime(object: ![[VAR_I]], location: !DIExpr(DIOpReferrer(i32)))
 ; AFTER-RA-DAG: ![[STACK_LIFETIME_VAR_R:[0-9]+]] = distinct !DILifetime(object: ![[VAR_R]], location: !DIExpr(DIOpReferrer(i32)))
-
+; AFTER-PEI-DAG: ![[ENTRY_LIFETIME_VAR_I:[0-9]+]] = distinct !DILifetime(object: ![[VAR_I]], location: !DIExpr(DIOpReferrer(i32)))
+; AFTER-PEI-DAG: ![[STACK_LIFETIME_VAR_I:[0-9]+]] = distinct !DILifetime(object: ![[VAR_I]], location: !DIExpr(DIOpReferrer(i32), DIOpConstant(i32 6), DIOpShr(), DIOpReinterpret(ptr addrspace(5)), DIOpDeref(i32), DIOpConstant(i32 4), DIOpByteOffset(i32)))
+; AFTER-PEI-DAG: ![[STACK_LIFETIME_VAR_R:[0-9]+]] = distinct !DILifetime(object: ![[VAR_R]], location: !DIExpr(DIOpReferrer(i32), DIOpConstant(i32 6), DIOpShr(), DIOpReinterpret(ptr addrspace(5)), DIOpDeref(i32), DIOpConstant(i32 8), DIOpByteOffset(i32)))
 ; COMMON-LABEL: bb.{{[0-9]}}.entry:
 ; COMMON: {{^$}}
-
 ; AFTER-ISEL-NOT: DBG_
 ; AFTER-ISEL: %[[#ARG_0_COPY_VREG:]]:vgpr_32 = COPY $vgpr0
 ; AFTER-ISEL-NOT: DBG_
@@ -37,21 +36,35 @@
 ; AFTER-RA: DBG_DEF ![[STACK_LIFETIME_VAR_R]], %stack.2.R
 ; AFTER-RA-NOT: DBG_
 
+; AFTER-PEI-NOT: DBG_
+; AFTER-PEI: DBG_DEF ![[ENTRY_LIFETIME_VAR_I]], renamable $vgpr0
+; AFTER-PEI-NOT: DBG_
+; AFTER-PEI: DBG_KILL ![[ENTRY_LIFETIME_VAR_I]]
+; AFTER-PEI-NOT: DBG_
+; AFTER-PEI: DBG_DEF ![[STACK_LIFETIME_VAR_I]], $sgpr33
+; AFTER-PEI-NOT: DBG_
+; AFTER-PEI: DBG_DEF ![[STACK_LIFETIME_VAR_R]], $sgpr33
+; AFTER-PEI-NOT: DBG_
+
 ; COMMON-LABEL: bb.{{[0-9]}}.Flow:
 
 ; AFTER-ISEL-NOT: DBG_
+; AFTER-PEI-NOT: DBG_
 
 ; COMMON-LABEL: bb.{{[0-9]}}.if.then:
 
 ; AFTER-ISEL-NOT: DBG_
+; AFTER-PEI-NOT: DBG_
 
 ; COMMON-LABEL: bb.{{[0-9]}}.if.else:
 
 ; AFTER-ISEL-NOT: DBG_
+; AFTER-PEI-NOT: DBG_
 
 ; COMMON-LABEL: bb.{{[0-9]}}.if.end:
 
 ; AFTER-ISEL-NOT: DBG_
+; AFTER-PEI-NOT: DBG_
 
 target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7"
 target triple = "amdgcn-amd-amdhsa"
