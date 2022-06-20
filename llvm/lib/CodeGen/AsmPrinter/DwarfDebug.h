@@ -103,10 +103,14 @@ public:
 
 class DbgVariable;
 
-bool operator<(const struct FrameIndexExpr &LHS,
-               const struct FrameIndexExpr &RHS);
-bool operator<(const struct EntryValueInfo &LHS,
-               const struct EntryValueInfo &RHS);
+// A pair to capture the arguments of a call to DBG_DEF
+struct DbgDefProxy {
+  std::reference_wrapper<const DILifetime> Lifetime;
+  std::reference_wrapper<const MachineOperand> Referrer;
+  explicit DbgDefProxy(const DILifetime &Lifetime,
+                       const MachineOperand &Referrer)
+      : Lifetime(Lifetime), Referrer(Referrer) {}
+};
 
 /// Proxy for one MMI entry.
 struct FrameIndexExpr {
@@ -186,9 +190,17 @@ struct EntryValue {
     EntryValues.insert({Reg, **NonVariadicExpr});
   }
 };
+/// Heterogeneous DWARF DBG_DEF location
+struct Def {
+  /// Records DbgDef referrers.
+  mutable SmallVector<DbgDefProxy, 1> DbgDefProxies;
+  explicit Def(const DILifetime &Lifetime, const MachineOperand &Referrer) {
+    DbgDefProxies.emplace_back(Lifetime, Referrer);
+  }
+};
 /// Alias for the std::variant specialization base class of DbgVariable.
 using Variant = std::variant<std::monostate, Loc::Single, Loc::Multi, Loc::MMI,
-                             Loc::EntryValue>;
+                             Loc::EntryValue, Loc::Def>;
 } // namespace Loc
 
 //===----------------------------------------------------------------------===//
@@ -440,6 +452,10 @@ class DwarfDebug : public DebugHandlerBase {
   /// Avoid using DW_OP_convert due to consumer incompatibilities.
   bool EnableOpConvert;
 
+  DenseMap<DIFragment *, const GlobalVariable *> GVFragmentMap;
+  DenseMap<DISubprogram *, SmallVector<DILifetime *>> SPLifetimeMap;
+  DenseSet<DILifetime *> ProcessedLifetimes;
+
 public:
   enum class MinimizeAddrInV5 {
     Default,
@@ -675,6 +691,10 @@ private:
   /// scope return true.
   bool buildLocationList(SmallVectorImpl<DebugLocEntry> &DebugLoc,
                          const DbgValueHistoryMap::Entries &Entries);
+
+  /// Collect variable information from MF.
+  void collectVariableInfoFromMF(DwarfCompileUnit &TheCU,
+                                 DenseSet<InlinedEntity> &P);
 
   /// Collect variable information from the side table maintained by MF.
   void collectVariableInfoFromMFTable(DwarfCompileUnit &TheCU,
