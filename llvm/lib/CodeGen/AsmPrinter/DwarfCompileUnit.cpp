@@ -187,6 +187,8 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
 
   addAnnotation(*VariableDIE, GV->getAnnotations());
 
+  addMemorySpaceAttribute(*VariableDIE, GV->getDWARFMemorySpace());
+
   if (uint32_t AlignInBytes = GV->getAlignInBytes())
     addUInt(*VariableDIE, dwarf::DW_AT_alignment, dwarf::DW_FORM_udata,
             AlignInBytes);
@@ -254,6 +256,8 @@ DIE *DwarfCompileUnit::getOrCreateGlobalVariableDIE(
     addGlobalName(GV->getName(), *VariableDIE, DeclContext);
 
   addAnnotation(*VariableDIE, GV->getAnnotations());
+
+  addMemorySpaceAttribute(*VariableDIE, GV->getDWARFMemorySpace());
 
   if (uint32_t AlignInBytes = GV->getAlignInBytes())
     addUInt(*VariableDIE, dwarf::DW_AT_alignment, dwarf::DW_FORM_udata,
@@ -1731,6 +1735,7 @@ void DwarfCompileUnit::applyCommonDbgVariableAttributes(const DbgVariable &Var,
     addString(VariableDie, dwarf::DW_AT_name, Name);
   const auto *DIVar = Var.getVariable();
   if (DIVar) {
+    addMemorySpaceAttribute(VariableDie, DIVar->getDWARFMemorySpace());
     if (uint32_t AlignInBytes = DIVar->getAlignInBytes())
       addUInt(VariableDie, dwarf::DW_AT_alignment, dwarf::DW_FORM_udata,
               AlignInBytes);
