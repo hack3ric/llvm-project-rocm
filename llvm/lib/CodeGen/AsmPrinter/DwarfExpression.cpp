@@ -952,8 +952,12 @@ void DwarfExprAST::lowerDIOpReferrer(DwarfExprAST::Node *OpNode) {
   assert(Referrer && "Cannot lower DIOp::Referrer without referrer operand");
 
   if (Referrer->isReg() && Referrer->getReg()) {
-    auto DWARFFrameRegister = TRI->getDwarfRegNum(Referrer->getReg(), false);
-    emitReg(DWARFFrameRegister);
+    auto DWARFRegister = TRI->getDwarfRegNum(Referrer->getReg(), false);
+    if (DWARFRegister == -1) {
+      IsImplemented = false;
+      return;
+    }
+    emitReg(DWARFRegister);
   } else if (Referrer->isImm()) {
     auto I = Referrer->getImm();
     if (I >= 0)

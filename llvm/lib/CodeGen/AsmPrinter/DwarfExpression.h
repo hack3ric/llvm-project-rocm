@@ -490,17 +490,17 @@ protected:
   };
 
   const AsmPrinter &AP;
-  // An `std::optional<const TargetRegisterInfo&>` where `nullptr` represents `std::nullopt`.
-  // Only present when in a function context.
+  // An `std::optional<const TargetRegisterInfo&>` where `nullptr` represents
+  // `None`. Only present when in a function context.
   const TargetRegisterInfo *TRI;
   DwarfCompileUnit &CU;
   const DILifetime &Lifetime;
-  // An `std::optional<MachineOperand>` where `nullptr` represents `std::nullopt`.
+  // An `std::optional<MachineOperand>` where `nullptr` represents `None`.
   // Only present when in a function context.
   const MachineOperand *Referrer;
-  // An `std::optional<const DenseMap<_, _>&>` where `nullptr` represents `std::nullopt`.
-  // Only present and applicable as part of an optimization for DIFragments
-  // which refer to global variable fragments.
+  // An `std::optional<const DenseMap<_, _>&>` where `nullptr` represents
+  // `None`. Only present and applicable as part of an optimization for
+  // DIFragments which refer to global variable fragments.
   const DenseMap<DIFragment *, const GlobalVariable *> *GVFragmentMap;
   std::unique_ptr<DwarfExprAST::Node> Root;
   // FIXME(KZHURAVL): This is a temporary boolean variable that indicates

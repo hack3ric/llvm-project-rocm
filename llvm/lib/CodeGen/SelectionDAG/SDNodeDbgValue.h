@@ -160,7 +160,7 @@ class SDDbgDef : public SDDbgDefKill {
   // in the proper position
   unsigned ReferrerOrder;
   int FrameIndex = 0;
-  unsigned Reg;
+  Register Reg;
   std::optional<SDValue> SDVal;
 
 public:
