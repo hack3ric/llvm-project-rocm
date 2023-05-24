@@ -482,8 +482,8 @@ void SIFrameLowering::emitEntryFunctionFlatScratchInit(
         std::min(static_cast<unsigned>(AllSGPR64s.size()), NumPreloaded));
     Register GITPtrLoReg = MFI->getGITPtrLoReg(MF);
     for (MCPhysReg Reg : AllSGPR64s) {
-      if (LiveUnits.available(Reg) && !MRI.isReserved(Reg) &&
-          MRI.isAllocatable(Reg) && !TRI->isSubRegisterEq(Reg, GITPtrLoReg)) {
+      if (LiveUnits.available(Reg) && MRI.isAllocatable(Reg) &&
+          (!GITPtrLoReg || !TRI->isSubRegisterEq(Reg, GITPtrLoReg))) {
         FlatScrInit = Reg;
         break;
       }
