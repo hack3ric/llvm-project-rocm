@@ -4678,6 +4678,13 @@ void Verifier::visitDIAssignIDMetadata(Instruction &I, MDNode *MD) {
   }
 }
 
+void Verifier::visitDIExpr(const DIExpr &) {
+  // TODO
+}
+void Verifier::visitDIFragment(const DIFragment &) {
+  // TODO
+}
+
 void Verifier::visitCallStackMetadata(MDNode *MD) {
   // Call stack metadata should consist of a list of at least 1 constant int
   // (representing a hash of the location).

@@ -15,6 +15,7 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/BitmaskEnum.h"
+#include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/PointerUnion.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -25,6 +26,7 @@
 #include "llvm/IR/PseudoProbe.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Discriminator.h"
 #include <cassert>
 #include <climits>
@@ -32,31 +34,51 @@
 #include <cstdint>
 #include <iterator>
 #include <optional>
+#include <variant>
 #include <vector>
 
 // Helper macros for defining get() overrides.
 #define DEFINE_MDNODE_GET_UNPACK_IMPL(...) __VA_ARGS__
 #define DEFINE_MDNODE_GET_UNPACK(ARGS) DEFINE_MDNODE_GET_UNPACK_IMPL ARGS
-#define DEFINE_MDNODE_GET_DISTINCT_TEMPORARY(CLASS, FORMAL, ARGS)              \
+// FIXME: When the DEFINE_MDNODE_GET alias below is removed this could be
+// renamed to just DEFINE_MDNODE_GET.
+#define DEFINE_MDNODE_GET_ONLY(CLASS, FORMAL, ARGS)                            \
+  static CLASS *get(LLVMContext &Context, DEFINE_MDNODE_GET_UNPACK(FORMAL)) {  \
+    return getImpl(Context, DEFINE_MDNODE_GET_UNPACK(ARGS), Uniqued);          \
+  }
+#define DEFINE_MDNODE_GET_IF_EXISTS(CLASS, FORMAL, ARGS)                       \
+  static CLASS *getIfExists(LLVMContext &Context,                              \
+                            DEFINE_MDNODE_GET_UNPACK(FORMAL)) {                \
+    return getImpl(Context, DEFINE_MDNODE_GET_UNPACK(ARGS), Uniqued,           \
+                   /* ShouldCreate */ false);                                  \
+  }
+#define DEFINE_MDNODE_GET_DISTINCT(CLASS, FORMAL, ARGS)                        \
   static CLASS *getDistinct(LLVMContext &Context,                              \
                             DEFINE_MDNODE_GET_UNPACK(FORMAL)) {                \
     return getImpl(Context, DEFINE_MDNODE_GET_UNPACK(ARGS), Distinct);         \
-  }                                                                            \
+  }
+#define DEFINE_MDNODE_GET_TEMPORARY(CLASS, FORMAL, ARGS)                       \
   static Temp##CLASS getTemporary(LLVMContext &Context,                        \
                                   DEFINE_MDNODE_GET_UNPACK(FORMAL)) {          \
     return Temp##CLASS(                                                        \
         getImpl(Context, DEFINE_MDNODE_GET_UNPACK(ARGS), Temporary));          \
   }
+#define DEFINE_ALL_MDNODE_GET_METHODS(CLASS, FORMAL, ARGS)                     \
+  DEFINE_MDNODE_GET_ONLY(CLASS, FORMAL, ARGS)                                  \
+  DEFINE_MDNODE_GET_IF_EXISTS(CLASS, FORMAL, ARGS)                             \
+  DEFINE_MDNODE_GET_DISTINCT(CLASS, FORMAL, ARGS)                              \
+  DEFINE_MDNODE_GET_TEMPORARY(CLASS, FORMAL, ARGS)
+// FIXME: This old naming is retained as an alias to make the diff smaller, but
+// could eventually be eliminated and the references updated.
 #define DEFINE_MDNODE_GET(CLASS, FORMAL, ARGS)                                 \
-  static CLASS *get(LLVMContext &Context, DEFINE_MDNODE_GET_UNPACK(FORMAL)) {  \
-    return getImpl(Context, DEFINE_MDNODE_GET_UNPACK(ARGS), Uniqued);          \
-  }                                                                            \
-  static CLASS *getIfExists(LLVMContext &Context,                              \
-                            DEFINE_MDNODE_GET_UNPACK(FORMAL)) {                \
-    return getImpl(Context, DEFINE_MDNODE_GET_UNPACK(ARGS), Uniqued,           \
-                   /* ShouldCreate */ false);                                  \
-  }                                                                            \
-  DEFINE_MDNODE_GET_DISTINCT_TEMPORARY(CLASS, FORMAL, ARGS)
+  DEFINE_ALL_MDNODE_GET_METHODS(CLASS, FORMAL, ARGS)
+#define DEFINE_ALWAYS_DISTINCT_MDNODE_GET_METHODS(CLASS, FORMAL, ARGS)         \
+  DEFINE_MDNODE_GET_DISTINCT(CLASS, FORMAL, ARGS)                              \
+  DEFINE_MDNODE_GET_TEMPORARY(CLASS, FORMAL, ARGS)
+#define DEFINE_ALWAYS_UNIQUED_MDNODE_GET_METHODS(CLASS, FORMAL, ARGS)          \
+  DEFINE_MDNODE_GET_ONLY(CLASS, FORMAL, ARGS)                                  \
+  DEFINE_MDNODE_GET_IF_EXISTS(CLASS, FORMAL, ARGS)                             \
+  DEFINE_MDNODE_GET_TEMPORARY(CLASS, FORMAL, ARGS)
 
 namespace llvm {
 
@@ -1451,7 +1473,7 @@ public:
   static void get() = delete;
   static void getIfExists() = delete;
 
-  DEFINE_MDNODE_GET_DISTINCT_TEMPORARY(
+  DEFINE_ALWAYS_DISTINCT_MDNODE_GET_METHODS(
       DICompileUnit,
       (unsigned SourceLanguage, DIFile *File, StringRef Producer,
        bool IsOptimized, StringRef Flags, unsigned RuntimeVersion,
@@ -1467,7 +1489,7 @@ public:
        GlobalVariables, ImportedEntities, Macros, DWOId, SplitDebugInlining,
        DebugInfoForProfiling, (unsigned)NameTableKind, RangesBaseAddress,
        SysRoot, SDK))
-  DEFINE_MDNODE_GET_DISTINCT_TEMPORARY(
+  DEFINE_ALWAYS_DISTINCT_MDNODE_GET_METHODS(
       DICompileUnit,
       (unsigned SourceLanguage, Metadata *File, MDString *Producer,
        bool IsOptimized, MDString *Flags, unsigned RuntimeVersion,
@@ -2571,8 +2593,65 @@ public:
   }
 };
 
-/// Base class for variables.
-class DIVariable : public DINode {
+/// Base class for program objects.
+class DIObject : public DINode {
+protected:
+  DIObject(LLVMContext &C, unsigned ID, StorageType Storage, unsigned Tag,
+           ArrayRef<Metadata *> Ops)
+      : DINode(C, ID, Storage, Tag, Ops) {}
+  ~DIObject() = default;
+
+public:
+  static bool classof(const Metadata *MD) {
+    switch (MD->getMetadataID()) {
+    default:
+      return false;
+    case DIFragmentKind:
+    case DILocalVariableKind:
+    case DIGlobalVariableKind:
+      return true;
+    }
+  }
+};
+
+/// Non-source program objects, and pieces of source program objects.
+class DIFragment : public DIObject {
+  friend class LLVMContextImpl;
+  friend class MDNode;
+
+  Type *Ty;
+
+private:
+  static DIFragment *getImpl(LLVMContext &Context, StorageType Storage,
+                             Type *Ty);
+
+protected:
+  DIFragment(LLVMContext &C, StorageType Storage, Type *Ty);
+  ~DIFragment() = default;
+
+public:
+  static void get() = delete;
+  static void getIfExists() = delete;
+
+  static DIFragment *getDistinct(LLVMContext &Context, Type *Ty) {
+    return getImpl(Context, Distinct, Ty);
+  }
+
+  static TempDIFragment getTemporary(LLVMContext &Context, Type *Ty) {
+    return TempDIFragment(getImpl(Context, Temporary, Ty));
+  }
+
+  TempDIFragment cloneImpl() const { return getTemporary(getContext(), Ty); }
+
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DIFragmentKind;
+  }
+
+  Type *getType() const { return Ty; }
+};
+
+/// Base class for source variable program objects.
+class DIVariable : public DIObject {
   unsigned Line;
   uint32_t AlignInBits;
 
@@ -3071,6 +3150,301 @@ template <> struct DenseMapInfo<DIExpression::FragmentInfo> {
   }
 
   static bool isEqual(const FragInfo &A, const FragInfo &B) { return A == B; }
+};
+
+namespace DIOp {
+
+// These are the concrete alternatives that a DIOp::Variant encapsulates.
+#define HANDLE_OP0(NAME)                                                       \
+  class NAME {                                                                 \
+  public:                                                                      \
+    explicit NAME() {}                                                         \
+    bool operator==(const NAME &O) const { return true; }                      \
+    friend hash_code hash_value(const NAME &O);                                \
+    static constexpr StringRef getAsmName();                                   \
+    static constexpr unsigned getBitcodeID();                                  \
+  };
+#define HANDLE_OP1(NAME, TYPE1, NAME1)                                         \
+  class NAME {                                                                 \
+    TYPE1 NAME1;                                                               \
+                                                                               \
+  public:                                                                      \
+    explicit NAME(TYPE1 NAME1) : NAME1(NAME1) {}                               \
+    bool operator==(const NAME &O) const { return NAME1 == O.NAME1; }          \
+    friend hash_code hash_value(const NAME &O);                                \
+    static constexpr StringRef getAsmName();                                   \
+    static constexpr unsigned getBitcodeID();                                  \
+    TYPE1 get##NAME1() const { return NAME1; }                                 \
+    void set##NAME1(TYPE1 NAME1) { this->NAME1 = NAME1; }                      \
+  };
+#define HANDLE_OP2(NAME, TYPE1, NAME1, TYPE2, NAME2)                           \
+  class NAME {                                                                 \
+    TYPE1 NAME1;                                                               \
+    TYPE2 NAME2;                                                               \
+                                                                               \
+  public:                                                                      \
+    explicit NAME(TYPE1 NAME1, TYPE2 NAME2) : NAME1(NAME1), NAME2(NAME2) {}    \
+    bool operator==(const NAME &O) const {                                     \
+      return NAME1 == O.NAME1 && NAME2 == O.NAME2;                             \
+    }                                                                          \
+    friend hash_code hash_value(const NAME &O);                                \
+    static constexpr StringRef getAsmName();                                   \
+    static constexpr unsigned getBitcodeID();                                  \
+    TYPE1 get##NAME1() const { return NAME1; }                                 \
+    void set##NAME1(TYPE1 NAME1) { this->NAME1 = NAME1; }                      \
+    TYPE2 get##NAME2() const { return NAME2; }                                 \
+    void set##NAME2(TYPE2 NAME2) { this->NAME2 = NAME2; }                      \
+  };
+LLVM_PACKED_START
+#include "llvm/IR/DIExprOps.def"
+LLVM_PACKED_END
+
+/// Container for a runtime-variant DIOp
+using Variant = std::variant<
+#define HANDLE_OP_NAME(NAME) NAME
+#define SEPARATOR ,
+#include "llvm/IR/DIExprOps.def"
+    >;
+
+#define HANDLE_OP_NAME(NAME)                                                   \
+  constexpr StringRef DIOp::NAME::getAsmName() { return "DIOp" #NAME; }
+#include "llvm/IR/DIExprOps.def"
+
+StringRef getAsmName(const Variant &V);
+
+#define DEFINE_BC_ID(NAME, ID)                                                 \
+  constexpr unsigned DIOp::NAME::getBitcodeID() { return ID; }
+DEFINE_BC_ID(Referrer, 1u)
+DEFINE_BC_ID(Arg, 2u)
+DEFINE_BC_ID(TypeObject, 3u)
+DEFINE_BC_ID(Constant, 4u)
+DEFINE_BC_ID(Convert, 5u)
+DEFINE_BC_ID(Reinterpret, 6u)
+DEFINE_BC_ID(BitOffset, 7u)
+DEFINE_BC_ID(ByteOffset, 8u)
+DEFINE_BC_ID(Composite, 9u)
+DEFINE_BC_ID(Extend, 10u)
+DEFINE_BC_ID(Select, 11u)
+DEFINE_BC_ID(AddrOf, 12u)
+DEFINE_BC_ID(Deref, 13u)
+DEFINE_BC_ID(Read, 14u)
+DEFINE_BC_ID(Add, 15u)
+DEFINE_BC_ID(Sub, 16u)
+DEFINE_BC_ID(Mul, 17u)
+DEFINE_BC_ID(Div, 18u)
+DEFINE_BC_ID(Shr, 19u)
+DEFINE_BC_ID(Shl, 20u)
+DEFINE_BC_ID(PushLane, 21u)
+#undef DEFINE_BC_ID
+
+unsigned getBitcodeID(const Variant &V);
+
+// The sizeof of `Op` is the size of the largest union variant, which
+// should essentially be defined as a packed struct equivalent to:
+//
+//    uint8_t Index; // Internal to std::variant, but we expect this to be
+//                   // the smallest available integral type which
+//                   // can represent our set of alternatives.
+//    uint32_t I;
+//    void* P;
+//
+// Note that there is no public interface which lets a pointer to the members
+// of the alternative types escape, and so we can safely pack them. This
+// may mean performance benefits (smaller memory footprint and more
+// cache-friendly traversal).
+//
+// This static_assert tries to catch issues where the struct is not packed into
+// at most two 64-bit words, as we would expect it to be.
+//
+// FIXME: If we can constrain `I` further to <= 16 bits we should also
+// fit in two 32-bit words on 32-bit targets.
+static_assert(sizeof(DIOp::Variant) <= 16);
+
+} // namespace DIOp
+
+class DIExpr;
+class DIExprBuilder;
+
+/// Immutable buffer to view debug info expressions.
+///
+/// Example of viewing an expression in a loop:
+///
+/// DIExpr *Expr = ...;
+/// ...
+/// for (const DIOp::Variant &Op : Expr.viewer())
+///   ...
+class DIExprViewer {
+  friend class DIExpr;
+protected:
+  LLVMContext &C;
+  SmallVector<DIOp::Variant> Elements;
+
+  /// Create a viewer for a new, initially empty expression.
+  explicit DIExprViewer(LLVMContext &C);
+  /// Create a viewer for a new expression for the sequence of ops in \p IL.
+  explicit DIExprViewer(LLVMContext &C,
+                        std::initializer_list<DIOp::Variant> IL);
+  /// Create a viewer for a new expression, initially a copy of \p E.
+  explicit DIExprViewer(const DIExpr &E);
+
+public:
+  class Iterator
+      : public iterator_facade_base<Iterator, std::random_access_iterator_tag,
+                                    DIOp::Variant> {
+    friend class DIExprViewer;
+    friend class DIExprBuilder;
+    DIOp::Variant *Op = nullptr;
+    Iterator(DIOp::Variant *Op) : Op(Op) {}
+
+  public:
+    Iterator() = delete;
+    Iterator(const Iterator &) = default;
+    Iterator &operator=(const Iterator &) = default;
+    bool operator==(const Iterator &R) const { return R.Op == Op; }
+    DIOp::Variant &operator*() const { return *Op; }
+    friend iterator_facade_base::difference_type operator-(Iterator LHS,
+                                                           Iterator RHS) {
+      return LHS.Op - RHS.Op;
+    }
+    Iterator &operator+=(iterator_facade_base::difference_type D) {
+      Op += D;
+      return *this;
+    }
+    Iterator &operator-=(iterator_facade_base::difference_type D) {
+      Op -= D;
+      return *this;
+    }
+  };
+
+  Iterator begin() { return Elements.begin(); }
+  Iterator end() { return Elements.end(); }
+  iterator_range<Iterator> range() { return make_range(begin(), end()); }
+
+  /// Returns true if the expression being built contains DIOp of type T,
+  /// false otherwise.
+  template <typename T> bool contains() const {
+    return any_of(Elements,
+                  [](auto &&E) { return std::holds_alternative<T>(E); });
+  }
+};
+
+/// Mutable buffer to manipulate debug info expressions.
+///
+/// Example of creating a new expression from scratch:
+///
+/// LLVMContext Ctx;
+///
+/// DIExpr::Builder Builder(Ctx);
+/// Builder.append<DIOp::Add>(Ty).intoExpr();
+///
+/// Example of creating a new expression based on an existing one:
+///
+/// DIExpr *Expr = ...;
+/// ...
+/// DIExpr *NewExpr = Expr.builder()
+///     .append<DIOp::Deref>(Ty)
+///     .intoExpr();
+class DIExprBuilder final : public DIExprViewer {
+#ifndef NDEBUG
+  bool StateIsUnspecified = false;
+#endif
+public:
+  /// Create a builder for a new, initially empty expression.
+  explicit DIExprBuilder(LLVMContext &C);
+  /// Create a builder for a new expression for the sequence of ops in \p IL.
+  explicit DIExprBuilder(LLVMContext &C,
+                         std::initializer_list<DIOp::Variant> IL);
+  /// Create a builder for a new expression, initially a copy of \p E.
+  explicit DIExprBuilder(const DIExpr &E);
+
+  Iterator insert(Iterator I, DIOp::Variant O);
+
+  template <typename T, typename... ArgsT>
+  Iterator insert(Iterator I, ArgsT &&...Args) {
+    // FIXME: SmallVector doesn't define an ::emplace(iterator, ...)
+    return Elements.insert(I.Op, DIOp::Variant{std::in_place_type<T>,
+                                               std::forward<ArgsT>(Args)...});
+  }
+
+  template <typename RangeTy> Iterator insert(Iterator I, RangeTy &&R) {
+    return Elements.insert(I.Op, R.begin(), R.end());
+  }
+
+  template <typename ItTy> Iterator insert(Iterator I, ItTy &&From, ItTy &&To) {
+    return Elements.insert(I.Op, std::forward<ItTy>(From),
+                           std::forward<ItTy>(To));
+  }
+
+  Iterator insert(Iterator I, std::initializer_list<DIOp::Variant> IL) {
+    return Elements.insert(I.Op, IL.begin(), IL.end());
+  }
+
+  /// Appends \p O to the expression being built.
+  DIExprBuilder &append(DIOp::Variant O);
+
+  /// Appends a new DIOp of type T to the expression being built. The new
+  /// DIOp is constructed in-place by forwarding the provided arguments Args.
+  template <typename T, typename... ArgsT>
+  DIExprBuilder &append(ArgsT &&...Args) {
+    Elements.emplace_back(std::in_place_type<T>, std::forward<ArgsT>(Args)...);
+    return *this;
+  }
+
+  Iterator erase(Iterator I);
+  Iterator erase(Iterator From, Iterator To);
+
+  /// Get the uniqued, immutable expression metadata from the current state
+  /// of the builder.
+  ///
+  /// This leaves the Builder in a valid but unspecified state, as if it were
+  /// moved from.
+  DIExpr *intoExpr();
+};
+
+template <class NodeTy> struct MDNodeKeyImpl;
+
+/// Immutable debug info expression.
+///
+/// This is an opaque, uniqued metadata node type defined by an immutable
+/// sequence of DIOp. In order to view or mutate an expression, use
+/// DIExpr::Builder.
+class DIExpr : public MDNode {
+  friend class LLVMContextImpl;
+  friend class MDNode;
+  friend struct MDNodeKeyImpl<DIExpr>;
+  friend class DIExprViewer;
+  friend class DIExprBuilder;
+
+  const SmallVector<DIOp::Variant> Elements;
+
+  DIExpr(LLVMContext &C, StorageType Storage,
+         SmallVector<DIOp::Variant> &&Elements)
+      : MDNode(C, DIExprKind, Storage, std::nullopt),
+        Elements(std::move(Elements)) {}
+  ~DIExpr() = default;
+
+  static DIExpr *getImpl(LLVMContext &Context,
+                         SmallVector<DIOp::Variant> &&Elements,
+                         StorageType Storage, bool ShouldCreate = true);
+
+  TempDIExpr cloneImpl() const {
+    auto Copy = Elements;
+    return getTemporary(getContext(), std::move(Copy));
+  }
+
+  DEFINE_ALWAYS_UNIQUED_MDNODE_GET_METHODS(
+      DIExpr, (SmallVector<DIOp::Variant> && Elements), (std::move(Elements)))
+
+public:
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DIExprKind;
+  }
+  TempDIExpr clone() const { return cloneImpl(); }
+
+  /// Convenience method to get a viewer by copying the current expression.
+  DIExprViewer viewer() const { return DIExprViewer(*this); }
+  /// Convenience method to get a builder by copying the current expression.
+  DIExprBuilder builder() const { return DIExprBuilder(*this); }
 };
 
 /// Global variables.
@@ -3756,7 +4130,9 @@ class DIArgList : public MDNode {
   void dropAllReferences();
 
 public:
-  DEFINE_MDNODE_GET(DIArgList, (ArrayRef<ValueAsMetadata *> Args), (Args))
+  DEFINE_ALWAYS_UNIQUED_MDNODE_GET_METHODS(DIArgList,
+                                           (ArrayRef<ValueAsMetadata *> Args),
+                                           (Args))
 
   TempDIArgList clone() const { return cloneImpl(); }
 
@@ -3874,6 +4250,13 @@ struct DenseMapInfo<DebugVariableAggregate>
 
 #undef DEFINE_MDNODE_GET_UNPACK_IMPL
 #undef DEFINE_MDNODE_GET_UNPACK
+#undef DEFINE_MDNODE_GET_ONLY
+#undef DEFINE_MDNODE_GET_IF_EXISTS
+#undef DEFINE_MDNODE_GET_DISTINCT
+#undef DEFINE_MDNODE_GET_TEMPORARY
+#undef DEFINE_ALL_MDNODE_GET_METHODS
 #undef DEFINE_MDNODE_GET
+#undef DEFINE_ALWAYS_DISTINCT_MDNODE_GET_METHODS
+#undef DEFINE_ALWAYS_UNIQUED_MDNODE_GET_METHODS
 
 #endif // LLVM_IR_DEBUGINFOMETADATA_H

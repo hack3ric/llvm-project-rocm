@@ -10,6 +10,7 @@
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/AsmParser/SlotMapping.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
@@ -409,6 +410,197 @@ TEST(AsmParserTest, InvalidDataLayoutStringCallback) {
       });
   ASSERT_TRUE(Mod2 != nullptr);
   EXPECT_EQ(Mod2->getDataLayout(), FixedDL);
+}
+
+class DIExprAsmParserTest : public testing::Test {
+protected:
+  LLVMContext Context;
+  Type *Int64Ty = Type::getInt64Ty(Context);
+  Type *Int32Ty = Type::getInt32Ty(Context);
+  Type *Int16Ty = Type::getInt16Ty(Context);
+  Type *Int8Ty = Type::getInt8Ty(Context);
+  Type *FloatTy = Type::getFloatTy(Context);
+  std::string IR;
+  std::unique_ptr<Module> M;
+
+  // NB: Can only be called once per test; acts as SetUp with an argument.
+  DIExpr *parseDIExpr(Twine Expr) {
+    IR = ("!named = !{" + Expr + "}").str();
+    SMDiagnostic Err;
+    M = parseAssemblyString(IR, Err, Context);
+    if (!M)
+      return nullptr;
+    NamedMDNode *N = M->getNamedMetadata("named");
+    if (!N || N->getNumOperands() != 1u || !isa<DIExpr>(N->getOperand(0)))
+      return nullptr;
+    return cast<DIExpr>(N->getOperand(0));
+  }
+};
+
+TEST_F(DIExprAsmParserTest, Empty) {
+  DIExpr *Expr = parseDIExpr("!DIExpr()");
+  EXPECT_TRUE(Expr != nullptr);
+  DIExprViewer Viewer = Expr->viewer();
+  ASSERT_EQ(std::distance(Viewer.begin(), Viewer.end()), 0u);
+}
+
+TEST_F(DIExprAsmParserTest, Referrer) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpReferrer(i32))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Referrer(Int32Ty)}));
+}
+
+TEST_F(DIExprAsmParserTest, Arg) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpArg(3, float))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Arg(3, FloatTy)}));
+}
+
+TEST_F(DIExprAsmParserTest, TypeObject) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpTypeObject(i32))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::TypeObject(Int32Ty)}));
+}
+
+TEST_F(DIExprAsmParserTest, Constant) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpConstant(float 2.0))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>(
+                {DIOp::Constant(ConstantFP::get(Context, APFloat(2.0f)))}));
+}
+
+TEST_F(DIExprAsmParserTest, Reinterpret) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpReinterpret(i32 addrspace(5)*))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>(
+                {DIOp::Reinterpret(PointerType::get(Context, 5))}));
+}
+
+TEST_F(DIExprAsmParserTest, BitOffset) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpBitOffset(i32))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::BitOffset(Int32Ty)}));
+}
+
+TEST_F(DIExprAsmParserTest, ByteOffset) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpByteOffset(i32))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::ByteOffset(Int32Ty)}));
+}
+
+TEST_F(DIExprAsmParserTest, Composite) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpComposite(2, i8))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Composite(2, Int8Ty)}));
+}
+
+TEST_F(DIExprAsmParserTest, Extend) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpExtend(2))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Extend(2)}));
+}
+
+TEST_F(DIExprAsmParserTest, Select) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpSelect())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Select()}));
+}
+
+TEST_F(DIExprAsmParserTest, AddrOf) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpAddrOf(7))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::AddrOf(7)}));
+}
+
+TEST_F(DIExprAsmParserTest, Deref) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpDeref(i32))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Deref(Int32Ty)}));
+}
+
+TEST_F(DIExprAsmParserTest, Read) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpRead())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Read()}));
+}
+
+TEST_F(DIExprAsmParserTest, Add) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpAdd())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Add()}));
+}
+
+TEST_F(DIExprAsmParserTest, Sub) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpSub())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Sub()}));
+}
+
+TEST_F(DIExprAsmParserTest, Mul) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpMul())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Mul()}));
+}
+
+TEST_F(DIExprAsmParserTest, Div) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpDiv())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Div()}));
+}
+
+TEST_F(DIExprAsmParserTest, Shr) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpShr())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Shr()}));
+}
+
+TEST_F(DIExprAsmParserTest, Shl) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpShl())");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::Shl()}));
+}
+
+TEST_F(DIExprAsmParserTest, PushLane) {
+  DIExpr *Expr = parseDIExpr("!DIExpr(DIOpPushLane(i32))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>({DIOp::PushLane(Int32Ty)}));
+}
+
+TEST_F(DIExprAsmParserTest, MultipleOps) {
+  DIExpr *Expr = parseDIExpr(R"(!DIExpr(
+    DIOpArg(0, i8),
+    DIOpArg(1, i8),
+    DIOpAdd(),
+    DIOpArg(2, i8),
+    DIOpComposite(2, i16),
+    DIOpReinterpret(i8 addrspace(1)*)
+  ))");
+  EXPECT_TRUE(Expr != nullptr);
+  ASSERT_EQ(SmallVector<DIOp::Variant>(Expr->viewer().range()),
+            SmallVector<DIOp::Variant>(
+                {DIOp::Arg(0, Int8Ty), DIOp::Arg(1, Int8Ty), DIOp::Add(),
+                 DIOp::Arg(2, Int8Ty), DIOp::Composite(2, Int16Ty),
+                 DIOp::Reinterpret(PointerType::get(Int8Ty, 1))}));
 }
 
 } // end anonymous namespace
