@@ -2555,6 +2555,8 @@ void CodeGenFunction::EmitParmDecl(const VarDecl &D, ParamValue Arg,
     auto AllocaAS = CGM.getASTAllocaAddressSpace();
     auto *V = DeclPtr.getPointer();
 
+    DebugPtr = DeclPtr;
+
     // For truly ABI indirect arguments -- those that are not `byval` -- store
     // the address of the argument on the stack to preserve debug information.
     ABIArgInfo ArgInfo = CurFnInfo->arguments()[ArgNo - 1].info;

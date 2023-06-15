@@ -507,10 +507,9 @@ entry:
 
 ; CHECK: DW_TAG_subprogram
 ; CHECK-LABEL: DW_AT_name ("Test_Func_Struct64Bytes")
-; FIXME: If no DBG_* instruction survives in the function through to AsmPrinter
-; the parameter variable is not mentioned in the output at all.
-; CHECK-NOT: DW_TAG_formal_parameter
-; CHECK-NOT: DW_AT_location (<empty>)
+; CHECK: DW_TAG_formal_parameter
+; FIXME: fix byval
+; CHECK: DW_AT_location (<empty>)
 
 ; Function Attrs: convergent mustprogress noinline nounwind optnone
 define dso_local void @_Z23Test_Func_Struct64Bytes12StructNBytesILj64EE(ptr addrspace(5) noundef byval(%struct.StructNBytes.7) align 1 %0) #0 !dbg !365 {

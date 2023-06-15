@@ -1438,6 +1438,7 @@ bool PEI::replaceFrameIndexDebugInstr(MachineFunction &MF, MachineInstr &MI,
   }
 
   if (MI.isDebugValue()) {
+
     MachineOperand &Op = MI.getOperand(OpIdx);
     assert(MI.isDebugOperand(&Op) &&
            "Frame indices can only appear as a debug operand in a DBG_VALUE*"

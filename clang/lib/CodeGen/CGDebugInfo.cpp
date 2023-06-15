@@ -5556,7 +5556,6 @@ static bool ReferencesAnonymousEntity(ArrayRef<TemplateArgument> Args) {
     return false;
   });
 }
-
 namespace {
 struct ReconstitutableType : public RecursiveASTVisitor<ReconstitutableType> {
   bool Reconstitutable = true;
