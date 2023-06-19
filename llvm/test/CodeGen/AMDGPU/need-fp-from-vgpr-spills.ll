@@ -282,7 +282,6 @@ define protected amdgpu_kernel void @kernel() {
 ; CHECK-NEXT:    s_mov_b64 s[0:1], s[20:21]
 ; CHECK-NEXT:    s_mov_b64 s[2:3], s[22:23]
 ; CHECK-NEXT:    s_swappc_b64 s[30:31], s[16:17]
-; CHECK-NEXT:    ; kill: def $vgpr1 killed $vgpr0 killed $exec
 ; CHECK-NEXT:    s_or_saveexec_b64 s[24:25], -1
 ; CHECK-NEXT:    buffer_load_dword v0, off, s[0:3], 0 offset:4 ; 4-byte Folded Reload
 ; CHECK-NEXT:    s_mov_b64 exec, s[24:25]
