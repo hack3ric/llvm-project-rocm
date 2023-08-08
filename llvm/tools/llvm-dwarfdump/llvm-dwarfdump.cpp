@@ -682,12 +682,13 @@ static bool dumpObjectFile(ObjectFile &Obj, DWARFContext &DICtx,
     return true;
   }
 
+#ifdef FIXME_GetRegName
   // Handle the --find-all-apple option and lower it to --debug-info=<offset>.
   if (FindAllApple) {
     findAllApple(DICtx, OS, GetRegName);
     return true;
   }
-
+#endif
   // Dump the complete DWARF structure.
   auto DumpOpts = getDumpOpts(DICtx);
   DumpOpts.GetNameForDWARFReg = Callbacks.GetNameForDWARFReg;
