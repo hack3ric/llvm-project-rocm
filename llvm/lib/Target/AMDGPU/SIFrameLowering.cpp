@@ -59,6 +59,59 @@ static void encodeDwarfRegisterLocation(int DwarfReg, raw_ostream &OS) {
   }
 }
 
+static MCCFIInstruction
+createScaledCFAInPrivateWave(const GCNSubtarget &ST,
+                             MCRegister DwarfStackPtrReg) {
+  assert(ST.enableFlatScratch());
+
+  // When flat scratch is used, the cfa is expressed in terms of private_lane
+  // (address space 5), but the debugger only accepts addresses in terms of
+  // private_wave (6). Override the cfa value using the expression
+  // (wave_size*cfa_reg), which is equivalent to (cfa_reg << wave_size_log2)
+  const unsigned WavefrontSizeLog2 = ST.getWavefrontSizeLog2();
+  assert(WavefrontSizeLog2 < 32);
+
+  SmallString<20> Block;
+  raw_svector_ostream OSBlock(Block);
+  encodeDwarfRegisterLocation(DwarfStackPtrReg, OSBlock);
+  OSBlock << uint8_t(dwarf::DW_OP_deref_size) << uint8_t(4)
+          << uint8_t(dwarf::DW_OP_lit0 + WavefrontSizeLog2)
+          << uint8_t(dwarf::DW_OP_shl)
+          << uint8_t(dwarf::DW_OP_lit0 +
+                     dwarf::DW_ASPACE_LLVM_AMDGPU_private_wave)
+          << uint8_t(dwarf::DW_OP_LLVM_form_aspace_address);
+
+  SmallString<20> CFIInst;
+  raw_svector_ostream OSCFIInst(CFIInst);
+  OSCFIInst << uint8_t(dwarf::DW_CFA_def_cfa_expression);
+  encodeULEB128(Block.size(), OSCFIInst);
+  OSCFIInst << Block;
+
+  return MCCFIInstruction::createEscape(nullptr, OSCFIInst.str());
+}
+
+void SIFrameLowering::emitDefCFA(MachineBasicBlock &MBB,
+                                 MachineBasicBlock::iterator MBBI,
+                                 DebugLoc const &DL, Register StackPtrReg,
+                                 bool AspaceAlreadyDefined,
+                                 MachineInstr::MIFlag Flags) const {
+  MachineFunction &MF = *MBB.getParent();
+  const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
+  const MCRegisterInfo *MCRI = MF.getMMI().getContext().getRegisterInfo();
+
+  MCRegister DwarfStackPtrReg = MCRI->getDwarfRegNum(StackPtrReg, false);
+  MCCFIInstruction CFIInst =
+      ST.enableFlatScratch()
+          ? createScaledCFAInPrivateWave(ST, DwarfStackPtrReg)
+          : (AspaceAlreadyDefined
+                 ? MCCFIInstruction::createLLVMDefAspaceCfa(
+                       nullptr, DwarfStackPtrReg, 0,
+                       dwarf::DW_ASPACE_LLVM_AMDGPU_private_wave, SMLoc())
+                 : MCCFIInstruction::createDefCfaRegister(nullptr,
+                                                          DwarfStackPtrReg));
+  buildCFI(MBB, MBBI, DL, CFIInst, Flags);
+}
+
 // Find a scratch register that we can use in the prologue. We avoid using
 // callee-save registers since they may appear to be free when this is called
 // from canUseAsPrologue (during shrink wrapping), but then no longer be free
@@ -1001,11 +1054,8 @@ void SIFrameLowering::emitPrologueEntryCFI(MachineBasicBlock &MBB,
   Register StackPtrReg =
       MF.getInfo<SIMachineFunctionInfo>()->getStackPtrOffsetReg();
 
-  // DW_ASPACE_AMDGPU_private_wave FIXME: should be defined elsewhere
-  buildCFI(
-      MBB, MBBI, DL,
-      MCCFIInstruction::createLLVMDefAspaceCfa(
-          nullptr, MCRI->getDwarfRegNum(StackPtrReg, false), 0, 6, SMLoc()));
+  emitDefCFA(MBB, MBBI, DL, StackPtrReg, /*AspaceAlreadyDefined=*/true,
+             MachineInstr::FrameSetup);
 
   buildCFIForRegToSGPRPairSpill(MBB, MBBI, DL, AMDGPU::PC_REG,
                                 TRI.getReturnAddressReg(MF));
@@ -1363,9 +1413,8 @@ void SIFrameLowering::emitPrologue(MachineFunction &MF,
 
   if (HasFP) {
     if (NeedsFrameMoves)
-      buildCFI(MBB, MBBI, DL,
-               MCCFIInstruction::createDefCfaRegister(
-                   nullptr, MCRI->getDwarfRegNum(FramePtrReg, false)));
+      emitDefCFA(MBB, MBBI, DL, FramePtrReg, /*AspaceAlreadyDefined=*/false,
+                 MachineInstr::FrameSetup);
   }
 
   if (HasFP && RoundedSize != 0) {
@@ -1458,16 +1507,12 @@ void SIFrameLowering::emitEpilogue(MachineFunction &MF,
     Add->getOperand(3).setIsDead(); // Mark SCC as dead.
   }
 
-  const MCRegisterInfo *MCRI = MF.getMMI().getContext().getRegisterInfo();
-
   // FIXME: Switch to using MF.needsFrameMoves() later
   const bool NeedsFrameMoves = true;
   if (hasFP(MF)) {
     if (NeedsFrameMoves)
-      buildCFI(MBB, MBBI, DL,
-               MCCFIInstruction::createDefCfaRegister(
-                   nullptr, MCRI->getDwarfRegNum(StackPtrReg, false)),
-               MachineInstr::FrameDestroy);
+      emitDefCFA(MBB, MBBI, DL, StackPtrReg, /*AspaceAlreadyDefined=*/false,
+                 MachineInstr::FrameDestroy);
   }
 
   if (FPSaved) {
@@ -1600,6 +1645,7 @@ void SIFrameLowering::processFunctionBeforeFrameFinalized(
           // FIXME: Need to update expression to locate lane of VGPR to which
           // the SGPR was spilled.
           if (MI.isDebugDef() && MI.getDebugOperand(0).isFI() &&
+              !MFI.isFixedObjectIndex(MI.getDebugOperand(0).getIndex()) &&
               SpillFIs[MI.getDebugOperand(0).getIndex()]) {
             MI.getDebugOperand(0).ChangeToRegister(Register(), false /*isDef*/);
           }
@@ -2100,6 +2146,7 @@ MachineInstr *SIFrameLowering::buildCFIForSGPRToVGPRSpill(
 
   int DwarfSGPR = MCRI.getDwarfRegNum(SGPR, false);
   int DwarfVGPR = MCRI.getDwarfRegNum(VGPR, false);
+  assert(DwarfSGPR != -1 && DwarfVGPR != -1);
 
   // CFI for an SGPR spilled to a single lane of a VGPR is implemented as an
   // expression(E) rule where E is a register location description referencing
@@ -2141,6 +2188,7 @@ MachineInstr *SIFrameLowering::buildCFIForSGPRToVGPRSpill(
   const MCRegisterInfo &MCRI = *MF.getMMI().getContext().getRegisterInfo();
 
   int DwarfSGPR = MCRI.getDwarfRegNum(SGPR, false);
+  assert(DwarfSGPR != -1);
 
   // CFI for an SGPR spilled to a multiple lanes of VGPRs is implemented as an
   // expression(E) rule where E is a composite location description
@@ -2202,6 +2250,7 @@ MachineInstr *SIFrameLowering::buildCFIForVGPRToVMEMSpill(
   const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
 
   int DwarfVGPR = MCRI.getDwarfRegNum(VGPR, false);
+  assert(DwarfVGPR != -1);
 
   SmallString<20> Block;
   raw_svector_ostream OSBlock(Block);
@@ -2244,6 +2293,7 @@ MachineInstr *SIFrameLowering::buildCFIForRegToSGPRPairSpill(
   int DwarfReg = MCRI.getDwarfRegNum(Reg, false);
   int DwarfSGPR0 = MCRI.getDwarfRegNum(SGPR0, false);
   int DwarfSGPR1 = MCRI.getDwarfRegNum(SGPR1, false);
+  assert(DwarfReg != -1 && DwarfSGPR0 != 1 && DwarfSGPR1 != 1);
 
   // CFI for a register spilled to a pair of SGPRs is implemented as an
   // expression(E) rule where E is a composite location description with
