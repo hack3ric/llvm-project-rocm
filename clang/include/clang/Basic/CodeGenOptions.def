@@ -345,6 +345,8 @@ CODEGENOPT(DebugStrictDwarf, 1, 1) ///< Whether or not to use strict DWARF info.
 /// Control the Assignment Tracking debug info feature.
 ENUM_CODEGENOPT(AssignmentTrackingMode, AssignmentTrackingOpts, 2, AssignmentTrackingOpts::Disabled)
 
+CODEGENOPT(ExperimentalDebugFragments, 1, 0)
+
 CODEGENOPT(DebugColumnInfo, 1, 0) ///< Whether or not to use column information
                                   ///< in debug info.
 

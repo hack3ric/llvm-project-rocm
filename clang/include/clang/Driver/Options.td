@@ -6922,6 +6922,12 @@ def fexperimental_assignment_tracking_EQ : Joined<["-"], "fexperimental-assignme
   Values<"disabled,enabled,forced">, NormalizedValues<["Disabled","Enabled","Forced"]>,
   MarshallingInfoEnum<CodeGenOpts<"AssignmentTrackingMode">, "Enabled">;
 
+defm fexperimental_debug_fragments_EQ : BoolFOption<"experimental-debug-fragments",
+  CodeGenOpts<"ExperimentalDebugFragments">, DefaultFalse,
+  PosFlag<SetTrue, [], [ClangOption, CC1Option], "Enable ">,
+  NegFlag<SetFalse, [], [ClangOption], "Disable ">,
+  BothFlags<[], [ClangOption], " heterogeneous debug expressions and fragment.">>;
+
 } // let Visibility = [CC1Option]
 
 //===----------------------------------------------------------------------===//
