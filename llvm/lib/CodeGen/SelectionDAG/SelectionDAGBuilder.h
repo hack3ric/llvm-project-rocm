@@ -131,8 +131,8 @@ class SelectionDAGBuilder {
     Value *getVariableLocationOp(unsigned Idx) const {
       assert(Idx == 0 && "Dangling variadic debug values not supported yet");
       if (isa<VarLocTy>(Info))
-        return cast<VarLocTy>(Info)->Values.getVariableLocationOp(Idx);
-      return cast<DbgValTy>(Info)->getVariableLocationOp(Idx);
+        return cast<VarLocTy>(Info)->Values.getVariableLocationOpAsValue(Idx);
+      return cast<DbgValTy>(Info)->getVariableLocationOpAsValue(Idx);
     }
     DebugLoc getDebugLoc() const {
       if (isa<VarLocTy>(Info))

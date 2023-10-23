@@ -1436,7 +1436,7 @@ bool HWAddressSanitizer::instrumentStack(memtag::StackInfo &SInfo,
       SmallVector<uint64_t, 8> NewOps = {dwarf::DW_OP_LLVM_tag_offset,
                                          retagMask(N)};
       for (size_t LocNo = 0; LocNo < DDI->getNumVariableLocationOps(); ++LocNo)
-        if (DDI->getVariableLocationOp(LocNo) == AI)
+        if (DDI->getVariableLocationOpAsValue(LocNo) == AI)
           DDI->setExpression(DIExpression::appendOpsToArg(DDI->getExpression(),
                                                           NewOps, LocNo));
     }

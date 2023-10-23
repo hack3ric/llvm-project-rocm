@@ -3772,7 +3772,7 @@ TEST_F(ValueAsMetadataTest, CollidingDoubleUpdates) {
 typedef MetadataTest DIArgListTest;
 
 TEST_F(DIArgListTest, get) {
-  SmallVector<ValueAsMetadata *, 2> VMs;
+  SmallVector<Metadata *, 2> VMs;
   VMs.push_back(
       ConstantAsMetadata::get(ConstantInt::get(Context, APInt(8, 0))));
   VMs.push_back(
@@ -3790,19 +3790,19 @@ TEST_F(DIArgListTest, UpdatesOnRAUW) {
       new GlobalVariable(Ty, false, GlobalValue::ExternalLinkage));
   auto *MD0 = ValueAsMetadata::get(GV0.get());
 
-  SmallVector<ValueAsMetadata *, 2> VMs;
+  SmallVector<Metadata *, 2> VMs;
   VMs.push_back(CI);
   VMs.push_back(MD0);
   auto *AL = DIArgList::get(Context, VMs);
-  EXPECT_EQ(AL->getArgs()[0], CI);
-  EXPECT_EQ(AL->getArgs()[1], MD0);
+  EXPECT_EQ(AL->args_begin()[0], CI);
+  EXPECT_EQ(AL->args_begin()[1], MD0);
 
   std::unique_ptr<GlobalVariable> GV1(
       new GlobalVariable(Ty, false, GlobalValue::ExternalLinkage));
   auto *MD1 = ValueAsMetadata::get(GV1.get());
   GV0->replaceAllUsesWith(GV1.get());
-  EXPECT_EQ(AL->getArgs()[0], CI);
-  EXPECT_EQ(AL->getArgs()[1], MD1);
+  EXPECT_EQ(AL->args_begin()[0], CI);
+  EXPECT_EQ(AL->args_begin()[1], MD1);
 }
 
 typedef MetadataTest TrackingMDRefTest;

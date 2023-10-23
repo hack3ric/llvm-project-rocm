@@ -1323,9 +1323,9 @@ template <> struct MDNodeKeyImpl<DIMacroFile> {
 };
 
 template <> struct MDNodeKeyImpl<DIArgList> {
-  ArrayRef<ValueAsMetadata *> Args;
+  ArrayRef<Metadata *> Args;
 
-  MDNodeKeyImpl(ArrayRef<ValueAsMetadata *> Args) : Args(Args) {}
+  MDNodeKeyImpl(ArrayRef<Metadata *> Args) : Args(Args) {}
   MDNodeKeyImpl(const DIArgList *N) : Args(N->getArgs()) {}
 
   bool isKeyOf(const DIArgList *RHS) const { return Args == RHS->getArgs(); }

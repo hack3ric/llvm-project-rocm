@@ -753,10 +753,12 @@ void CoroCloner::salvageDebugInfo() {
   for (DbgVariableIntrinsic *DVI : Worklist) {
     if (IsUnreachableBlock(DVI->getParent()))
       DVI->eraseFromParent();
-    else if (isa_and_nonnull<AllocaInst>(DVI->getVariableLocationOp(0))) {
+    // FIXME:
+    else if (isa_and_nonnull<AllocaInst>(DVI->getVariableLocationOpAsValue(0))) {
       // Count all non-debuginfo uses in reachable blocks.
       unsigned Uses = 0;
-      for (auto *User : DVI->getVariableLocationOp(0)->users())
+      // FIXME:
+      for (auto *User : DVI->getVariableLocationOpAsValue(0)->users())
         if (auto *I = dyn_cast<Instruction>(User))
           if (!isa<AllocaInst>(I) && !IsUnreachableBlock(I->getParent()))
             ++Uses;

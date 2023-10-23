@@ -176,52 +176,6 @@ public:
   /// @}
 };
 
-// Iterator for ValueAsMetadata that internally uses direct pointer iteration
-// over either a ValueAsMetadata* or a ValueAsMetadata**, dereferencing to the
-// ValueAsMetadata .
-class location_op_iterator
-    : public iterator_facade_base<location_op_iterator,
-                                  std::bidirectional_iterator_tag, Value *> {
-  PointerUnion<ValueAsMetadata *, ValueAsMetadata **> I;
-
-public:
-  location_op_iterator(ValueAsMetadata *SingleIter) : I(SingleIter) {}
-  location_op_iterator(ValueAsMetadata **MultiIter) : I(MultiIter) {}
-
-  location_op_iterator(const location_op_iterator &R) : I(R.I) {}
-  location_op_iterator &operator=(const location_op_iterator &R) {
-    I = R.I;
-    return *this;
-  }
-  bool operator==(const location_op_iterator &RHS) const { return I == RHS.I; }
-  const Value *operator*() const {
-    ValueAsMetadata *VAM = isa<ValueAsMetadata *>(I)
-                               ? cast<ValueAsMetadata *>(I)
-                               : *cast<ValueAsMetadata **>(I);
-    return VAM->getValue();
-  };
-  Value *operator*() {
-    ValueAsMetadata *VAM = isa<ValueAsMetadata *>(I)
-                               ? cast<ValueAsMetadata *>(I)
-                               : *cast<ValueAsMetadata **>(I);
-    return VAM->getValue();
-  }
-  location_op_iterator &operator++() {
-    if (isa<ValueAsMetadata *>(I))
-      I = cast<ValueAsMetadata *>(I) + 1;
-    else
-      I = cast<ValueAsMetadata **>(I) + 1;
-    return *this;
-  }
-  location_op_iterator &operator--() {
-    if (isa<ValueAsMetadata *>(I))
-      I = cast<ValueAsMetadata *>(I) - 1;
-    else
-      I = cast<ValueAsMetadata **>(I) - 1;
-    return *this;
-  }
-};
-
 /// Lightweight class that wraps the location operand metadata of a debug
 /// intrinsic. The raw location may be a ValueAsMetadata, an empty MDTuple,
 /// or a DIArgList.
@@ -243,11 +197,27 @@ public:
   /// info intrinsic.  Depending on the intrinsic, this could be the
   /// variable's value or its address.
   iterator_range<location_op_iterator> location_ops() const;
-  Value *getVariableLocationOp(unsigned OpIdx) const;
+  iterator_range<location_value_op_iterator> location_value_ops() const;
+
+  Metadata *getVariableLocationOp(unsigned OpIdx) const;
   unsigned getNumVariableLocationOps() const {
     if (hasArgList())
-      return cast<DIArgList>(getRawLocation())->getArgs().size();
+      return cast<DIArgList>(getRawLocation())->Args.size();
     return 1;
+  }
+  std::optional<Value *> getVariableLocationOpIfValue(unsigned OpIdx) const {
+    Metadata *M = getVariableLocationOp(OpIdx);
+    if (isa<MDNode>(M) && !isa<DINode>(M))
+      return nullptr;
+    auto *VAM = dyn_cast<ValueAsMetadata>(M);
+    if (!VAM)
+      return std::nullopt;
+    return VAM->getValue();
+  }
+  Value * getVariableLocationOpAsValue(unsigned OpIdx) const {
+    auto OptV = getVariableLocationOpIfValue(OpIdx);
+    assert(OptV);
+    return *OptV;
   }
   bool hasArgList() const { return isa<DIArgList>(getRawLocation()); }
   bool isKillLocation(const DIExpression *Expression) const {
@@ -260,7 +230,8 @@ public:
       return true;
     // Variadic and non-variadic: Interpret expressions using undef or poison
     // values as kills.
-    return any_of(location_ops(), [](Value *V) { return isa<UndefValue>(V); });
+    return any_of(location_value_ops(),
+                  [](Value *V) { return isa<UndefValue>(V); });
   }
 
   friend bool operator==(const RawLocationWrapper &A,
@@ -296,8 +267,11 @@ public:
   /// info intrinsic.  Depending on the intrinsic, this could be the
   /// variable's value or its address.
   iterator_range<location_op_iterator> location_ops() const;
+  iterator_range<location_value_op_iterator> location_value_ops() const;
 
-  Value *getVariableLocationOp(unsigned OpIdx) const;
+  Metadata *getVariableLocationOp(unsigned OpIdx) const;
+  std::optional<Value *> getVariableLocationOpIfValue(unsigned OpIdx) const;
+  Value * getVariableLocationOpAsValue(unsigned OpIdx) const;
 
   void replaceVariableLocationOp(Value *OldValue, Value *NewValue);
   void replaceVariableLocationOp(unsigned OpIdx, Value *NewValue);
@@ -345,7 +319,7 @@ public:
     // TODO: When/if we remove duplicate values from DIArgLists, we don't need
     // this set anymore.
     SmallPtrSet<Value *, 4> RemovedValues;
-    for (Value *OldValue : location_ops()) {
+    for (Value *OldValue : location_value_ops()) {
       if (!RemovedValues.insert(OldValue).second)
         continue;
       Value *Poison = PoisonValue::get(OldValue->getType());
@@ -465,10 +439,21 @@ protected:
 /// This represents the llvm.dbg.declare instruction.
 class DbgDeclareInst : public DbgVariableIntrinsic {
 public:
-  Value *getAddress() const {
+  Metadata *getAddress() const {
     assert(getNumVariableLocationOps() == 1 &&
            "dbg.declare must have exactly 1 location operand.");
     return getVariableLocationOp(0);
+  }
+  std::optional<Value *> getAddressIfValue() const {
+    auto *M = dyn_cast_or_null<ValueAsMetadata>(getAddress());
+    if (!M)
+      return std::nullopt;
+    return M->getValue();
+  }
+  Value *getAddressAsValue() const {
+    if (auto V = getAddressIfValue())
+      return *V;
+    return nullptr;
   }
 
   /// \name Casting methods
@@ -488,7 +473,8 @@ public:
   // The default argument should only be used in ISel, and the default option
   // should be removed once ISel support for multiple location ops is complete.
   Value *getValue(unsigned OpIdx = 0) const {
-    return getVariableLocationOp(OpIdx);
+    // FIXME:
+    return cast<ValueAsMetadata>(getVariableLocationOp(OpIdx))->getValue();
   }
   iterator_range<location_op_iterator> getValues() const {
     return location_ops();
@@ -518,7 +504,9 @@ class DbgAssignIntrinsic : public DbgValueInst {
   };
 
 public:
-  Value *getAddress() const;
+  Metadata *getAddress() const;
+  std::optional<Value *> getAddressIfValue() const;
+  Value * getAddressAsValue() const;
   Metadata *getRawAddress() const {
     return cast<MetadataAsValue>(getArgOperand(OpAddress))->getMetadata();
   }

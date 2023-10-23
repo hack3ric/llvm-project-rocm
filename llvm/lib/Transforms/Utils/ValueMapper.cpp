@@ -394,8 +394,11 @@ Value *Mapper::mapValue(const Value *V) {
                        MDTuple::get(V->getContext(), std::nullopt));
     }
     if (auto *AL = dyn_cast<DIArgList>(MD)) {
-      SmallVector<ValueAsMetadata *, 4> MappedArgs;
-      for (auto *VAM : AL->getArgs()) {
+      SmallVector<Metadata *, 4> MappedArgs;
+      for (auto *M : AL->args()) {
+        ValueAsMetadata *VAM = dyn_cast<ValueAsMetadata>(M);
+        if (!VAM)
+          continue;
         // Map both Local and Constant VAMs here; they will both ultimately
         // be mapped via mapValue. The exceptions are constants when we have no
         // module level changes and locals when they have no existing mapped

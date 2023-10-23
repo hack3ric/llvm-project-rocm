@@ -6413,10 +6413,10 @@ static void updateDVIWithLocations(DbgValueInst &DVI,
   assert(numLLVMArgOps(Ops) != 0 &&
          "Expected expression that references DIArglist locations using "
          "DW_OP_llvm_arg operands.");
-  SmallVector<ValueAsMetadata *, 3> MetadataLocs;
+  SmallVector<Metadata *, 3> MetadataLocs;
   for (Value *V : Locations)
     MetadataLocs.push_back(ValueAsMetadata::get(V));
-  auto ValArrayRef = llvm::ArrayRef<llvm::ValueAsMetadata *>(MetadataLocs);
+  auto ValArrayRef = llvm::ArrayRef<llvm::Metadata *>(MetadataLocs);
   DVI.setRawLocation(llvm::DIArgList::get(DVI.getContext(), ValArrayRef));
   DVI.setExpression(DIExpression::get(DVI.getContext(), Ops));
 }
@@ -6483,12 +6483,12 @@ static void restorePreTransformState(DVIRecoveryRec &DVIRec) {
         getValueOrPoison(DVIRec.LocationOps[0], DVIRec.DVI->getContext());
     DVIRec.DVI->setRawLocation(ValueAsMetadata::get(CachedValue));
   } else {
-    SmallVector<ValueAsMetadata *, 3> MetadataLocs;
+    SmallVector<Metadata *, 3> MetadataLocs;
     for (WeakVH VH : DVIRec.LocationOps) {
       Value *CachedValue = getValueOrPoison(VH, DVIRec.DVI->getContext());
       MetadataLocs.push_back(ValueAsMetadata::get(CachedValue));
     }
-    auto ValArrayRef = llvm::ArrayRef<llvm::ValueAsMetadata *>(MetadataLocs);
+    auto ValArrayRef = llvm::ArrayRef<llvm::Metadata *>(MetadataLocs);
     DVIRec.DVI->setRawLocation(
         llvm::DIArgList::get(DVIRec.DVI->getContext(), ValArrayRef));
   }
@@ -6655,7 +6655,7 @@ static void DbgGatherSalvagableDVI(
       // DIExpression.
       const auto &HasTranslatableLocationOps =
           [&](const DbgValueInst *DVI) -> bool {
-        for (const auto LocOp : DVI->location_ops()) {
+        for (const auto LocOp : DVI->location_value_ops()) {
           if (!LocOp)
             return false;
 
@@ -6678,7 +6678,11 @@ static void DbgGatherSalvagableDVI(
       // Pre-allocating a vector will enable quick lookups of the builder later
       // during the salvage.
       NewRec->RecoveryExprs.resize(DVI->getNumVariableLocationOps());
-      for (const auto LocOp : DVI->location_ops()) {
+      for (const auto M : DVI->location_ops()) {
+        // FIXME:
+        auto *VAM = dyn_cast<ValueAsMetadata>(M);
+        assert(VAM);
+        Value *LocOp = VAM->getValue();
         NewRec->SCEVs.push_back(SE.getSCEV(LocOp));
         NewRec->LocationOps.push_back(LocOp);
         NewRec->HadLocationArgList = DVI->hasArgList();

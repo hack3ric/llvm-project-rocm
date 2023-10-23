@@ -34,7 +34,7 @@ bool User::replaceUsesOfWith(Value *From, Value *To) {
       Changed = true;
     }
   if (auto DVI = dyn_cast_or_null<DbgVariableIntrinsic>(this)) {
-    if (is_contained(DVI->location_ops(), From)) {
+    if (is_contained(DVI->location_value_ops(), From)) {
       DVI->replaceVariableLocationOp(From, To);
       Changed = true;
     }

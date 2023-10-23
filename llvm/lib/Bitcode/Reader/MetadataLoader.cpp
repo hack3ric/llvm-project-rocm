@@ -610,17 +610,22 @@ class MetadataLoader::MetadataLoaderImpl {
     if (!NeedDeclareExpressionUpgrade)
       return;
 
-    for (auto &BB : F)
-      for (auto &I : BB)
-        if (auto *DDI = dyn_cast<DbgDeclareInst>(&I))
-          if (auto *DIExpr = DDI->getExpression())
-            if (DIExpr->startsWithDeref() &&
-                isa_and_nonnull<Argument>(DDI->getAddress())) {
-              SmallVector<uint64_t, 8> Ops;
-              Ops.append(std::next(DIExpr->elements_begin()),
-                         DIExpr->elements_end());
-              DDI->setExpression(DIExpression::get(Context, Ops));
-            }
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        auto *DDI = dyn_cast<DbgDeclareInst>(&I);
+        if (!DDI)
+          continue;
+        DIExpression *DIExpr = DDI->getExpression();
+        if (!DIExpr || !DIExpr->startsWithDeref())
+          continue;
+        auto *AddressOp = dyn_cast_or_null<ValueAsMetadata>(DDI->getAddress());
+        if (!AddressOp || !isa_and_nonnull<Argument>(AddressOp->getValue()))
+          continue;
+        SmallVector<uint64_t, 8> Ops;
+        Ops.append(std::next(DIExpr->elements_begin()), DIExpr->elements_end());
+        DDI->setExpression(DIExpression::get(Context, Ops));
+      }
+    }
   }
 
   /// Upgrade the expression from previous versions.
@@ -2411,16 +2416,16 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     break;
   }
   case bitc::METADATA_ARG_LIST: {
-    SmallVector<ValueAsMetadata *, 4> Elts;
+    SmallVector<Metadata *, 4> Elts;
     Elts.reserve(Record.size());
     for (uint64_t Elt : Record) {
       Metadata *MD = getMD(Elt);
       if (isa<MDNode>(MD) && cast<MDNode>(MD)->isTemporary())
         return error(
             "Invalid record: DIArgList should not contain forward refs");
-      if (!isa<ValueAsMetadata>(MD))
+      if (!isa<Metadata>(MD))
         return error("Invalid record");
-      Elts.push_back(cast<ValueAsMetadata>(MD));
+      Elts.push_back(cast<Metadata>(MD));
     }
 
     MetadataList.assignValue(DIArgList::get(Context, Elts), NextMetadataNo);

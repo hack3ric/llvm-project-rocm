@@ -5525,13 +5525,14 @@ bool LLParser::parseDIArgList(MDNode *&Result, bool IsDistinct,
   if (parseToken(lltok::lparen, "expected '(' here"))
     return true;
 
-  SmallVector<ValueAsMetadata *, 4> Args;
+  SmallVector<Metadata *, 4> Args;
   if (Lex.getKind() != lltok::rparen)
     do {
       Metadata *MD;
-      if (parseValueAsMetadata(MD, "expected value-as-metadata operand", PFS))
+      // FIXME: Restrict to just those metadata nodes explicitly supported?
+      if (parseMetadata(MD, PFS))
         return true;
-      Args.push_back(dyn_cast<ValueAsMetadata>(MD));
+      Args.push_back(MD);
     } while (EatIfPresent(lltok::comma));
 
   if (parseToken(lltok::rparen, "expected ')' here"))

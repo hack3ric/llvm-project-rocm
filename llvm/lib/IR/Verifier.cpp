@@ -6437,7 +6437,7 @@ void Verifier::verifyNotEntryValue(const DbgVariableIntrinsic &I) {
     return;
 
   if (isa<ValueAsMetadata>(I.getRawLocation())) {
-    Value *VarValue = I.getVariableLocationOp(0);
+    Value *VarValue = I.getVariableLocationOpAsValue(0);
     if (isa<UndefValue>(VarValue) || isa<PoisonValue>(VarValue))
       return;
     // We allow EntryValues for swift async arguments, as they have an

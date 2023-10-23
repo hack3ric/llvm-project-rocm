@@ -1885,7 +1885,9 @@ bool at::calculateFragmentIntersect(
   // address-modifying expression.
   int64_t PointerOffsetInBits;
   {
-    auto DestOffsetInBytes = DAI->getAddress()->getPointerOffsetFrom(Dest, DL);
+    // FIXME:
+    auto DestOffsetInBytes =
+        DAI->getAddressAsValue()->getPointerOffsetFrom(Dest, DL);
     if (!DestOffsetInBytes)
       return false; // Can't calculate difference in addresses.
 
@@ -2126,19 +2128,20 @@ bool AssignmentTrackingPass::runOnFunction(Function &F) {
       // leave dbg.declares with non-empty expressions in place.
       if (DDI->getExpression()->getNumElements() != 0)
         continue;
-      if (!DDI->getAddress())
+      auto *VAM = dyn_cast_or_null<ValueAsMetadata>(DDI->getAddress());
+      if (!VAM)
         continue;
-      if (AllocaInst *Alloca =
-              dyn_cast<AllocaInst>(DDI->getAddress()->stripPointerCasts())) {
-        // FIXME: Skip VLAs for now (let these variables use dbg.declares).
-        if (!Alloca->isStaticAlloca())
-          continue;
-        // Similarly, skip scalable vectors (use dbg.declares instead).
-        if (auto Sz = Alloca->getAllocationSize(*DL); Sz && Sz->isScalable())
-          continue;
-        DbgDeclares[Alloca].insert(DDI);
-        Vars[Alloca].insert(VarRecord(DDI));
-      }
+      auto *Alloca = dyn_cast<AllocaInst>(VAM->getValue()->stripPointerCasts());
+      if (!Alloca)
+        continue;
+      // FIXME: Skip VLAs for now (let these variables use dbg.declares).
+      if (!Alloca->isStaticAlloca())
+        continue;
+      // Similarly, skip scalable vectors (use dbg.declares instead).
+      if (auto Sz = Alloca->getAllocationSize(*DL); Sz && Sz->isScalable())
+        continue;
+      DbgDeclares[Alloca].insert(DDI);
+      Vars[Alloca].insert(VarRecord(DDI));
     }
   }
 

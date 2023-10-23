@@ -1563,7 +1563,12 @@ static void fixupDebugInfoPostExtraction(Function &OldFunc, Function &NewFunc,
       continue;
     }
 
-    auto IsInvalidLocation = [&NewFunc](Value *Location) {
+    auto IsInvalidLocation = [&NewFunc](Metadata *M) {
+      // FIXME:
+      ValueAsMetadata *VAM = dyn_cast_or_null<ValueAsMetadata>(M);
+      if (!VAM)
+        return true;
+      Value *Location = VAM->getValue();
       // Location is invalid if it isn't a constant or an instruction, or is an
       // instruction but isn't in the new function.
       if (!Location ||

@@ -142,8 +142,8 @@ static OrderMap orderModule(const Module &M) {
               orderConstantValue(VAM->getValue());
             } else if (const auto *AL =
                            dyn_cast<DIArgList>(MAV->getMetadata())) {
-              for (const auto *VAM : AL->getArgs())
-                orderConstantValue(VAM->getValue());
+              for (const auto *V : AL->value_args())
+                orderConstantValue(V);
             }
           }
         }
@@ -278,8 +278,8 @@ static UseListOrderStack predictUseListOrder(const Module &M) {
               predictValueUseListOrder(VAM->getValue(), &F, OM, Stack);
             } else if (const auto *AL =
                            dyn_cast<DIArgList>(MAV->getMetadata())) {
-              for (const auto *VAM : AL->getArgs())
-                predictValueUseListOrder(VAM->getValue(), &F, OM, Stack);
+              for (const auto *V : AL->value_args())
+                predictValueUseListOrder(V, &F, OM, Stack);
             }
           }
         }
@@ -422,7 +422,7 @@ ValueEnumerator::ValueEnumerator(const Module &M,
           if (isa<LocalAsMetadata>(MD->getMetadata()))
             continue;
           if (auto *AL = dyn_cast<DIArgList>(MD->getMetadata())) {
-            for (auto *VAM : AL->getArgs())
+            for (auto *VAM : AL->args())
               if (isa<ConstantAsMetadata>(VAM))
                 EnumerateMetadata(&F, VAM);
             continue;
@@ -771,7 +771,7 @@ void ValueEnumerator::EnumerateFunctionLocalListMetadata(
     return;
   }
 
-  for (ValueAsMetadata *VAM : ArgList->getArgs()) {
+  for (ValueAsMetadata *VAM : ArgList->value_as_metadata_args()) {
     if (isa<LocalAsMetadata>(VAM)) {
       assert(MetadataMap.count(VAM) &&
              "LocalAsMetadata should be enumerated before DIArgList");
@@ -1097,7 +1097,7 @@ void ValueEnumerator::incorporateFunction(const Function &F) {
             FnLocalMDVector.push_back(Local);
           } else if (auto *ArgList = dyn_cast<DIArgList>(MD->getMetadata())) {
             ArgListMDVector.push_back(ArgList);
-            for (ValueAsMetadata *VMD : ArgList->getArgs()) {
+            for (ValueAsMetadata *VMD : ArgList->value_as_metadata_args()) {
               if (auto *Local = dyn_cast<LocalAsMetadata>(VMD)) {
                 // Enumerate metadata after the instructions they might refer
                 // to.

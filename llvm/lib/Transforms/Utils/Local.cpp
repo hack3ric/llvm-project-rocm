@@ -1475,7 +1475,7 @@ static bool PhiHasDebugValue(DILocalVariable *DIVar,
   SmallVector<DbgValueInst *, 1> DbgValues;
   findDbgValues(DbgValues, APN);
   for (auto *DVI : DbgValues) {
-    assert(is_contained(DVI->getValues(), APN));
+    assert(is_contained(DVI->location_value_ops(), APN));
     if ((DVI->getVariable() == DIVar) && (DVI->getExpression() == DIExpr))
       return true;
   }
@@ -1503,8 +1503,9 @@ static bool valueCoversEntireFragment(Type *ValTy, DbgVariableIntrinsic *DII) {
     // DII should have exactly 1 location when it is an address.
     assert(DII->getNumVariableLocationOps() == 1 &&
            "address of variable must have exactly 1 location operand.");
+    // FIXME:
     if (auto *AI =
-            dyn_cast_or_null<AllocaInst>(DII->getVariableLocationOp(0))) {
+            dyn_cast_or_null<AllocaInst>(DII->getVariableLocationOpAsValue(0))) {
       if (std::optional<TypeSize> FragmentSize =
               AI->getAllocationSizeInBits(DL)) {
         return TypeSize::isKnownGE(ValueSize, *FragmentSize);
@@ -1645,7 +1646,8 @@ bool llvm::LowerDbgDeclare(Function &F) {
 
   for (auto &I : Dbgs) {
     DbgDeclareInst *DDI = I;
-    AllocaInst *AI = dyn_cast_or_null<AllocaInst>(DDI->getAddress());
+    // FIXME:
+    AllocaInst *AI = dyn_cast_or_null<AllocaInst>(DDI->getAddressAsValue());
     // If this is an alloca for a scalar variable, insert a dbg.value
     // at each load and store to the alloca and erase the dbg.declare.
     // The dbg.values allow tracking a variable even if it is not
@@ -1715,7 +1717,7 @@ void llvm::insertDebugValuesForPHIs(BasicBlock *BB,
   ValueToValueMapTy DbgValueMap;
   for (auto &I : *BB) {
     if (auto DbgII = dyn_cast<DbgVariableIntrinsic>(&I)) {
-      for (Value *V : DbgII->location_ops())
+      for (Value *V : DbgII->location_value_ops())
         if (auto *Loc = dyn_cast_or_null<PHINode>(V))
           DbgValueMap.insert({Loc, DbgII});
     }
@@ -1752,7 +1754,7 @@ void llvm::insertDebugValuesForPHIs(BasicBlock *BB,
         DbgVariableIntrinsic *NewDbgII = NewDI->second;
         // If PHI contains VI as an operand more than once, we may
         // replaced it in NewDbgII; confirm that it is present.
-        if (is_contained(NewDbgII->location_ops(), VI))
+        if (is_contained(NewDbgII->location_value_ops(), VI))
           NewDbgII->replaceVariableLocationOp(VI, PHI);
       }
     }
@@ -1827,7 +1829,8 @@ void llvm::salvageDebugInfo(Instruction &I) {
 
 /// Salvage the address component of \p DAI.
 static void salvageDbgAssignAddress(DbgAssignIntrinsic *DAI) {
-  Instruction *I = dyn_cast<Instruction>(DAI->getAddress());
+  // FIXME:
+  Instruction *I = dyn_cast<Instruction>(DAI->getAddressAsValue());
   // Only instructions can be salvaged at the moment.
   if (!I)
     return;
@@ -1870,7 +1873,7 @@ void llvm::salvageDebugInfoForDbgValues(
 
   for (auto *DII : DbgUsers) {
     if (auto *DAI = dyn_cast<DbgAssignIntrinsic>(DII)) {
-      if (DAI->getAddress() == &I) {
+      if (DAI->getAddressAsValue() == &I) {
         salvageDbgAssignAddress(DAI);
         Salvaged = true;
       }
@@ -1881,7 +1884,7 @@ void llvm::salvageDebugInfoForDbgValues(
     // Do not add DW_OP_stack_value for DbgDeclare, because they are implicitly
     // pointing out the value as a DWARF memory location description.
     bool StackValue = isa<DbgValueInst>(DII);
-    auto DIILocation = DII->location_ops();
+    auto DIILocation = DII->location_value_ops();
     assert(
         is_contained(DIILocation, &I) &&
         "DbgVariableIntrinsic must use salvaged instruction as its location");

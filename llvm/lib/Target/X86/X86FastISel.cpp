@@ -2762,8 +2762,8 @@ bool X86FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
   case Intrinsic::dbg_declare: {
     const DbgDeclareInst *DI = cast<DbgDeclareInst>(II);
     X86AddressMode AM;
-    assert(DI->getAddress() && "Null address should be checked earlier!");
-    if (!X86SelectAddress(DI->getAddress(), AM))
+    assert(DI->getAddressAsValue() && "Null address should be checked earlier!");
+    if (!X86SelectAddress(DI->getAddressAsValue(), AM))
       return false;
     const MCInstrDesc &II = TII.get(TargetOpcode::DBG_VALUE);
     assert(DI->getVariable()->isValidLocationForIntrinsic(MIMD.getDL()) &&

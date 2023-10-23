@@ -527,7 +527,7 @@ ADCEChanged AggressiveDeadCodeElimination::removeDeadInstructions() {
         // If intrinsic is pointing at a live SSA value, there may be an
         // earlier optimization bug: if we know the location of the variable,
         // why isn't the scope of the location alive?
-        for (Value *V : DII->location_ops()) {
+        for (Value *V : DII->location_value_ops()) {
           if (Instruction *II = dyn_cast<Instruction>(V)) {
             if (isLive(II)) {
               dbgs() << "Dropping debug info for " << *DII << "\n";

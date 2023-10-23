@@ -3095,7 +3095,7 @@ bool SimplifyCFGOpt::SpeculativelyExecuteBB(BranchInst *BI,
     //   store %merge, %x.dest, !DIAssignID !2
     //   dbg.assign %merge, "x", ..., !2
     for (auto *DAI : at::getAssignmentMarkers(SpeculatedStore)) {
-      if (llvm::is_contained(DAI->location_ops(), OrigV))
+      if (llvm::is_contained(DAI->location_value_ops(), OrigV))
         DAI->replaceVariableLocationOp(OrigV, S);
     }
   }

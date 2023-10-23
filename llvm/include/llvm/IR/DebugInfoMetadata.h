@@ -90,6 +90,66 @@ class DbgVariableIntrinsic;
 
 extern cl::opt<bool> EnableFSDiscriminator;
 
+namespace LocOpIterImpl {
+
+class Iter : public iterator_facade_base<Iter, std::random_access_iterator_tag,
+                                         Metadata *, std::ptrdiff_t, Metadata*, Metadata*> {
+  PointerUnion<Metadata *, Metadata **> I;
+
+public:
+  Iter(Metadata *SingleIter) : I(SingleIter) {}
+  Iter(Metadata **MultiIter) : I(MultiIter) {}
+
+  Iter(const Iter &R) : I(R.I) {}
+  Iter &operator=(const Iter &R) {
+    I = R.I;
+    return *this;
+  }
+  bool operator==(const Iter &RHS) const { return I == RHS.I; }
+  bool operator<(const Iter &RHS) const { return I < RHS.I; }
+  Metadata *operator*() const {
+    return isa<Metadata *>(I) ? cast<Metadata *>(I) : *cast<Metadata **>(I);
+  };
+  std::ptrdiff_t operator-(const Iter &RHS) const {
+    assert(isa<Metadata *>(I) == isa<Metadata *>(RHS.I));
+    if (isa<Metadata *>(I))
+      return cast<Metadata *>(I) - cast<Metadata *>(RHS.I);
+    return cast<Metadata **>(I) - cast<Metadata **>(RHS.I);
+  }
+  Iter &operator+=(std::ptrdiff_t N) {
+    if (isa<Metadata *>(I))
+      I = cast<Metadata *>(I) + N;
+    else
+      I = cast<Metadata **>(I) + N;
+    return *this;
+  }
+  Iter &operator-=(std::ptrdiff_t N) {
+    if (isa<Metadata *>(I))
+      I = cast<Metadata *>(I) - N;
+    else
+      I = cast<Metadata **>(I) - N;
+    return *this;
+  }
+};
+
+bool IsVAM(Metadata *M);
+using IsVAMFilterIter = filter_iterator<Iter, decltype(&IsVAM)>;
+
+ValueAsMetadata *AsVAM (Metadata *M);
+using AsVAMMappedIter = mapped_iterator<IsVAMFilterIter, decltype(&AsVAM)>;
+
+Value *GetValue(Metadata *M);
+using GetValueMappedIter = mapped_iterator<IsVAMFilterIter, decltype(&GetValue)>;
+} // namespace LocOpIterImpl
+
+using location_op_iterator = LocOpIterImpl::Iter;
+using location_value_as_metadata_op_iterator = LocOpIterImpl::AsVAMMappedIter;
+location_value_as_metadata_op_iterator
+getAsVAMMappedIter(location_op_iterator Begin, location_op_iterator End);
+using location_value_op_iterator = LocOpIterImpl::GetValueMappedIter;
+location_value_op_iterator getGetValueMappedIter(location_op_iterator Begin,
+                                                 location_op_iterator End);
+
 class DITypeRefArray {
   const MDTuple *N = nullptr;
 
@@ -4100,17 +4160,19 @@ public:
   }
 };
 
-/// List of ValueAsMetadata, to be used as an argument to a dbg.value
-/// intrinsic.
+/// List of Metadata, to be used as an argument to a dbg.value intrinsic.
 class DIArgList : public MDNode {
   friend class LLVMContextImpl;
   friend class MDNode;
-  using iterator = SmallVectorImpl<ValueAsMetadata *>::iterator;
+  friend struct MDNodeKeyImpl<DIArgList>;
+  friend class RawLocationWrapper;
+  using iterator = SmallVectorImpl<Metadata *>::iterator;
+  using const_iterator = SmallVectorImpl<Metadata *>::const_iterator;
 
-  SmallVector<ValueAsMetadata *, 4> Args;
+  SmallVector<Metadata *, 4> Args;
 
   DIArgList(LLVMContext &C, StorageType Storage,
-            ArrayRef<ValueAsMetadata *> Args)
+            ArrayRef<Metadata *> Args)
       : MDNode(C, DIArgListKind, Storage, std::nullopt),
         Args(Args.begin(), Args.end()) {
     track();
@@ -4118,28 +4180,55 @@ class DIArgList : public MDNode {
   ~DIArgList() { untrack(); }
 
   static DIArgList *getImpl(LLVMContext &Context,
-                            ArrayRef<ValueAsMetadata *> Args,
+                            ArrayRef<Metadata *> Args,
                             StorageType Storage, bool ShouldCreate = true);
 
   TempDIArgList cloneImpl() const {
-    return getTemporary(getContext(), getArgs());
+    return getTemporary(getContext(), Args);
   }
 
   void track();
   void untrack();
   void dropAllReferences();
 
+  ArrayRef<Metadata *> getArgs() const { return Args; }
+
 public:
   DEFINE_ALWAYS_UNIQUED_MDNODE_GET_METHODS(DIArgList,
-                                           (ArrayRef<ValueAsMetadata *> Args),
+                                           (ArrayRef<Metadata *> Args),
                                            (Args))
 
   TempDIArgList clone() const { return cloneImpl(); }
 
-  ArrayRef<ValueAsMetadata *> getArgs() const { return Args; }
+  location_op_iterator args_begin() { return Args.begin(); }
+  location_op_iterator args_end() { return Args.end(); }
+  iterator_range<location_op_iterator> args() {
+    return make_range(args_begin(), args_end());
+  }
+  iterator_range<location_value_as_metadata_op_iterator>
+  value_as_metadata_args() {
+    return {getAsVAMMappedIter(args_begin(), args_end()),
+            getAsVAMMappedIter(args_end(), args_end())};
+  }
+  iterator_range<location_value_op_iterator> value_args() {
+    return {getGetValueMappedIter(args_begin(), args_end()),
+            getGetValueMappedIter(args_end(), args_end())};
+  }
 
-  iterator args_begin() { return Args.begin(); }
-  iterator args_end() { return Args.end(); }
+  location_op_iterator args_begin() const { return const_cast<Metadata **>(Args.begin()); }
+  location_op_iterator args_end() const { return const_cast<Metadata **>(Args.end()); }
+  iterator_range<location_op_iterator> args() const {
+    return make_range(args_begin(), args_end());
+  }
+  iterator_range<location_value_as_metadata_op_iterator>
+  value_as_metadata_args() const {
+    return {getAsVAMMappedIter(args_begin(), args_end()),
+            getAsVAMMappedIter(args_end(), args_end())};
+  }
+  iterator_range<location_value_op_iterator> value_args() const {
+    return {getGetValueMappedIter(args_begin(), args_end()),
+            getGetValueMappedIter(args_end(), args_end())};
+  }
 
   static bool classof(const Metadata *MD) {
     return MD->getMetadataID() == DIArgListKind;

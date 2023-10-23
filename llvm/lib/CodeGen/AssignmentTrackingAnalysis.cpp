@@ -160,7 +160,10 @@ void FunctionVarLocs::print(raw_ostream &OS, const Function &Fn) const {
     OS << "DEF Var=[" << (unsigned)Loc.VariableID << "]"
        << " Expr=" << *Loc.Expr << " Values=(";
     for (auto *Op : Loc.Values.location_ops()) {
-      errs() << Op->getName() << " ";
+      if (auto *VAM = dyn_cast<ValueAsMetadata>(Op))
+        errs() << VAM->getValue()->getName() << " ";
+      else
+        Op->printAsOperand(errs());
     }
     errs() << ")\n";
   };
@@ -403,7 +406,7 @@ class MemLocFragmentFill {
   /// Return a string for the value that \p BaseID represents.
   std::string toString(unsigned BaseID) {
     if (BaseID)
-      return Bases[BaseID].getVariableLocationOp(0)->getName().str();
+      return Bases[BaseID].getVariableLocationOpAsValue(0)->getName().str();
     else
       return "None";
   }
@@ -1444,7 +1447,7 @@ void AssignmentTrackingLowering::emitDbgValue(
       // The address isn't valid so treat this as a non-memory def.
       Kind = LocKind::Val;
     } else {
-      Value *Val = DAI->getAddress();
+      Value *Val = DAI->getAddressAsValue();
       DIExpression *Expr = DAI->getAddressExpression();
       assert(!Expr->getFragmentInfo() &&
              "fragment info should be stored in value-expression only");

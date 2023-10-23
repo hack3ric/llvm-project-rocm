@@ -8356,8 +8356,8 @@ bool CodeGenPrepare::fixupDbgValue(Instruction *I) {
 
   // Does this dbg.value refer to a sunk address calculation?
   bool AnyChange = false;
-  SmallDenseSet<Value *> LocationOps(DVI.location_ops().begin(),
-                                     DVI.location_ops().end());
+  SmallDenseSet<Value *> LocationOps(DVI.location_value_ops().begin(),
+                                     DVI.location_value_ops().end());
   for (Value *Location : LocationOps) {
     WeakTrackingVH SunkAddrVH = SunkAddrs[Location];
     Value *SunkAddr = SunkAddrVH.pointsToAliveValue() ? SunkAddrVH : nullptr;
@@ -8390,7 +8390,7 @@ bool CodeGenPrepare::placeDbgValues(Function &F) {
         continue;
 
       SmallVector<Instruction *, 4> VIs;
-      for (Value *V : DVI->getValues())
+      for (Value *V : DVI->location_value_ops())
         if (Instruction *VI = dyn_cast_or_null<Instruction>(V))
           VIs.push_back(VI);
 

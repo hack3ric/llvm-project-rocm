@@ -1971,8 +1971,9 @@ void ModuleBitcodeWriter::writeDIMacroFile(const DIMacroFile *N,
 void ModuleBitcodeWriter::writeDIArgList(const DIArgList *N,
                                          SmallVectorImpl<uint64_t> &Record,
                                          unsigned Abbrev) {
-  Record.reserve(N->getArgs().size());
-  for (ValueAsMetadata *MD : N->getArgs())
+  auto Args = N->args();
+  Record.reserve(llvm::size(Args));
+  for (Metadata *MD : Args)
     Record.push_back(VE.getMetadataID(MD));
 
   Stream.EmitRecord(bitc::METADATA_ARG_LIST, Record, Abbrev);

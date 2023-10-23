@@ -623,11 +623,13 @@ TEST_F(CloneFunc, DebugIntrinsics) {
       DbgDeclareInst* NewIntrin = dyn_cast<DbgDeclareInst>(&NewI);
       EXPECT_TRUE(NewIntrin);
 
+      // FIXME:
       // Old address must belong to the old function
-      EXPECT_EQ(OldFunc, cast<AllocaInst>(OldIntrin->getAddress())->
+      EXPECT_EQ(OldFunc, cast<AllocaInst>(OldIntrin->getAddressAsValue())->
                          getParent()->getParent());
+      // FIXME:
       // New address must belong to the new function
-      EXPECT_EQ(NewFunc, cast<AllocaInst>(NewIntrin->getAddress())->
+      EXPECT_EQ(NewFunc, cast<AllocaInst>(NewIntrin->getAddressAsValue())->
                          getParent()->getParent());
 
       if (OldIntrin->getDebugLoc()->getInlinedAt()) {

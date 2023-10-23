@@ -2356,7 +2356,7 @@ static void writeDIArgList(raw_ostream &Out, const DIArgList *N,
   Out << "!DIArgList(";
   FieldSeparator FS;
   MDFieldPrinter Printer(Out, WriterCtx);
-  for (Metadata *Arg : N->getArgs()) {
+  for (Metadata *Arg : N->args()) {
     Out << FS;
     WriteAsOperandInternal(Out, Arg, WriterCtx, true);
   }

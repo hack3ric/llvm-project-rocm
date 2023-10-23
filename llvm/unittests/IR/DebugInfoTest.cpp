@@ -396,13 +396,15 @@ TEST(DbgAssignIntrinsicTest, replaceVariableLocationOp) {
   Value *P1 = Fun.getArg(1);
   Value *P2 = Fun.getArg(2);
   DbgAssignIntrinsic *DAI = cast<DbgAssignIntrinsic>(Fun.begin()->begin());
-  ASSERT_TRUE(V1 == DAI->getVariableLocationOp(0));
-  ASSERT_TRUE(P1 == DAI->getAddress());
+  // FIXME:
+  ASSERT_TRUE(V1 == DAI->getVariableLocationOpAsValue(0));
+  ASSERT_TRUE(P1 == DAI->getAddressAsValue());
 
+  // FIXME:
 #define TEST_REPLACE(Old, New, ExpectedValue, ExpectedAddr)                    \
   DAI->replaceVariableLocationOp(Old, New);                                    \
-  EXPECT_EQ(DAI->getVariableLocationOp(0), ExpectedValue);                     \
-  EXPECT_EQ(DAI->getAddress(), ExpectedAddr);
+  EXPECT_EQ(DAI->getVariableLocationOpAsValue(0), ExpectedValue);              \
+  EXPECT_EQ(DAI->getAddressAsValue(), ExpectedAddr);
 
   // Replace address only.
   TEST_REPLACE(/*Old*/ P1, /*New*/ P2, /*Value*/ V1, /*Address*/ P2);

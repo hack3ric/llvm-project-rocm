@@ -72,19 +72,28 @@ bool IntrinsicInst::mayLowerToFunctionCall(Intrinsic::ID IID) {
 ///
 
 iterator_range<location_op_iterator> RawLocationWrapper::location_ops() const {
-  Metadata *MD = getRawLocation();
-  assert(MD && "First operand of DbgVariableIntrinsic should be non-null.");
+  assert(RawLocation &&
+         "First operand of DbgVariableIntrinsic should be non-null.");
   // If operand is ValueAsMetadata, return a range over just that operand.
-  if (auto *VAM = dyn_cast<ValueAsMetadata>(MD)) {
-    return {location_op_iterator(VAM), location_op_iterator(VAM + 1)};
+  if (auto *VAM = dyn_cast<ValueAsMetadata>(RawLocation)) {
+    return llvm::make_range(location_op_iterator(RawLocation),
+                            location_op_iterator(RawLocation + 1));
   }
   // If operand is DIArgList, return a range over its args.
-  if (auto *AL = dyn_cast<DIArgList>(MD))
-    return {location_op_iterator(AL->args_begin()),
-            location_op_iterator(AL->args_end())};
+  if (auto *AL = dyn_cast<DIArgList>(RawLocation))
+    return llvm::make_range(location_op_iterator(AL->args_begin()),
+                            location_op_iterator(AL->args_end()));
   // Operand must be an empty metadata tuple, so return empty iterator.
-  return {location_op_iterator(static_cast<ValueAsMetadata *>(nullptr)),
-          location_op_iterator(static_cast<ValueAsMetadata *>(nullptr))};
+  return llvm::make_range(
+      location_op_iterator(static_cast<Metadata *>(nullptr)),
+      location_op_iterator(static_cast<Metadata *>(nullptr)));
+}
+
+iterator_range<location_value_op_iterator>
+RawLocationWrapper::location_value_ops() const {
+  auto Range = location_ops();
+  return {getGetValueMappedIter(Range.begin(), Range.end()),
+          getGetValueMappedIter(Range.end(), Range.end())};
 }
 
 iterator_range<location_op_iterator>
@@ -92,24 +101,33 @@ DbgVariableIntrinsic::location_ops() const {
   return getWrappedLocation().location_ops();
 }
 
-Value *DbgVariableIntrinsic::getVariableLocationOp(unsigned OpIdx) const {
+iterator_range<location_value_op_iterator>
+DbgVariableIntrinsic::location_value_ops() const {
+  return getWrappedLocation().location_value_ops();
+}
+
+Metadata *DbgVariableIntrinsic::getVariableLocationOp(unsigned OpIdx) const {
   return getWrappedLocation().getVariableLocationOp(OpIdx);
 }
 
-Value *RawLocationWrapper::getVariableLocationOp(unsigned OpIdx) const {
+std::optional<Value *>
+DbgVariableIntrinsic::getVariableLocationOpIfValue(unsigned OpIdx) const {
+  return getWrappedLocation().getVariableLocationOpIfValue(OpIdx);
+}
+
+Value *
+DbgVariableIntrinsic::getVariableLocationOpAsValue(unsigned OpIdx) const {
+  return getWrappedLocation().getVariableLocationOpAsValue(OpIdx);
+}
+
+Metadata *RawLocationWrapper::getVariableLocationOp(unsigned OpIdx) const {
   Metadata *MD = getRawLocation();
   assert(MD && "First operand of DbgVariableIntrinsic should be non-null.");
   if (auto *AL = dyn_cast<DIArgList>(MD))
-    return AL->getArgs()[OpIdx]->getValue();
-  if (isa<MDNode>(MD))
-    return nullptr;
-  assert(
-      isa<ValueAsMetadata>(MD) &&
-      "Attempted to get location operand from DbgVariableIntrinsic with none.");
-  auto *V = cast<ValueAsMetadata>(MD);
+    return AL->Args[OpIdx];
   assert(OpIdx == 0 && "Operand Index must be 0 for a debug intrinsic with a "
                        "single location operand.");
-  return V->getValue();
+  return MD;
 }
 
 static ValueAsMetadata *getAsMetadata(Value *V) {
@@ -124,7 +142,8 @@ void DbgVariableIntrinsic::replaceVariableLocationOp(Value *OldValue,
   // it with NewValue and return true.
   auto ReplaceDbgAssignAddress = [this, OldValue, NewValue]() -> bool {
     auto *DAI = dyn_cast<DbgAssignIntrinsic>(this);
-    if (!DAI || OldValue != DAI->getAddress())
+    // FIXME:
+    if (!DAI || OldValue != DAI->getAddressAsValue())
       return false;
     DAI->setAddress(NewValue);
     return true;
@@ -133,7 +152,7 @@ void DbgVariableIntrinsic::replaceVariableLocationOp(Value *OldValue,
   (void)DbgAssignAddrReplaced;
 
   assert(NewValue && "Values must be non-null");
-  auto Locations = location_ops();
+  auto Locations = location_value_ops();
   auto OldIt = find(Locations, OldValue);
   if (OldIt == Locations.end()) {
     assert(DbgAssignAddrReplaced &&
@@ -149,10 +168,10 @@ void DbgVariableIntrinsic::replaceVariableLocationOp(Value *OldValue,
                                   getContext(), ValueAsMetadata::get(NewValue));
     return setArgOperand(0, NewOperand);
   }
-  SmallVector<ValueAsMetadata *, 4> MDs;
-  ValueAsMetadata *NewOperand = getAsMetadata(NewValue);
-  for (auto *VMD : Locations)
-    MDs.push_back(VMD == *OldIt ? NewOperand : getAsMetadata(VMD));
+  SmallVector<Metadata *, 4> MDs;
+  Metadata *NewOperand = getAsMetadata(NewValue);
+  for (auto *MD : Locations)
+    MDs.push_back(MD == *OldIt ? NewOperand : getAsMetadata(MD));
   setArgOperand(
       0, MetadataAsValue::get(getContext(), DIArgList::get(getContext(), MDs)));
 }
@@ -166,11 +185,8 @@ void DbgVariableIntrinsic::replaceVariableLocationOp(unsigned OpIdx,
                                   getContext(), ValueAsMetadata::get(NewValue));
     return setArgOperand(0, NewOperand);
   }
-  SmallVector<ValueAsMetadata *, 4> MDs;
-  ValueAsMetadata *NewOperand = getAsMetadata(NewValue);
-  for (unsigned Idx = 0; Idx < getNumVariableLocationOps(); ++Idx)
-    MDs.push_back(Idx == OpIdx ? NewOperand
-                               : getAsMetadata(getVariableLocationOp(Idx)));
+  SmallVector<Metadata *, 4> MDs(location_ops());
+  MDs[OpIdx] = getAsMetadata(NewValue);
   setArgOperand(
       0, MetadataAsValue::get(getContext(), DIArgList::get(getContext(), MDs)));
 }
@@ -183,9 +199,7 @@ void DbgVariableIntrinsic::addVariableLocationOps(ArrayRef<Value *> NewValues,
          "location operand.");
   assert(!is_contained(NewValues, nullptr) && "New values must be non-null");
   setArgOperand(2, MetadataAsValue::get(getContext(), NewExpr));
-  SmallVector<ValueAsMetadata *, 4> MDs;
-  for (auto *VMD : location_ops())
-    MDs.push_back(getAsMetadata(VMD));
+  SmallVector<Metadata *, 4> MDs(location_ops());
   for (auto *VMD : NewValues)
     MDs.push_back(getAsMetadata(VMD));
   setArgOperand(
@@ -198,14 +212,21 @@ std::optional<uint64_t> DbgVariableIntrinsic::getFragmentSizeInBits() const {
   return getVariable()->getSizeInBits();
 }
 
-Value *DbgAssignIntrinsic::getAddress() const {
-  auto *MD = getRawAddress();
+Metadata *DbgAssignIntrinsic::getAddress() const {
+  return getRawAddress();
+}
+
+std::optional<Value *> DbgAssignIntrinsic::getAddressIfValue() const {
+  auto *MD = getAddress();
   if (auto *V = dyn_cast<ValueAsMetadata>(MD))
     return V->getValue();
+  return std::nullopt;
+}
 
-  // When the value goes to null, it gets replaced by an empty MDNode.
-  assert(!cast<MDNode>(MD)->getNumOperands() && "Expected an empty MDNode");
-  return nullptr;
+Value * DbgAssignIntrinsic::getAddressAsValue() const {
+  auto OptV = getAddressIfValue();
+  assert(OptV);
+  return *OptV;
 }
 
 void DbgAssignIntrinsic::setAssignId(DIAssignID *New) {
@@ -220,11 +241,12 @@ void DbgAssignIntrinsic::setAddress(Value *V) {
 void DbgAssignIntrinsic::setKillAddress() {
   if (isKillAddress())
     return;
-  setAddress(UndefValue::get(getAddress()->getType()));
+  // FIXME:
+  setAddress(UndefValue::get(getAddressAsValue()->getType()));
 }
 
 bool DbgAssignIntrinsic::isKillAddress() const {
-  Value *Addr = getAddress();
+  Value *Addr = getAddressAsValue();
   return !Addr || isa<UndefValue>(Addr);
 }
 

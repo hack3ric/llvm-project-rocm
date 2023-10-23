@@ -34,6 +34,29 @@ cl::opt<bool> EnableFSDiscriminator(
     cl::desc("Enable adding flow sensitive discriminators"));
 } // namespace llvm
 
+bool LocOpIterImpl::IsVAM(Metadata *M) {
+  return isa_and_nonnull<ValueAsMetadata>(M);
+}
+ValueAsMetadata *LocOpIterImpl::AsVAM(Metadata *M) {
+  return &cast<ValueAsMetadata>(*M);
+}
+Value *LocOpIterImpl::GetValue(Metadata *VAM) {
+  return cast<ValueAsMetadata>(VAM)->getValue();
+}
+location_value_as_metadata_op_iterator
+llvm::getAsVAMMappedIter(location_op_iterator Begin, location_op_iterator End) {
+  return location_value_as_metadata_op_iterator(
+      LocOpIterImpl::IsVAMFilterIter(Begin, End, &LocOpIterImpl::IsVAM),
+      &LocOpIterImpl::AsVAM);
+}
+location_value_op_iterator
+llvm::getGetValueMappedIter(location_op_iterator Begin,
+                            location_op_iterator End) {
+  return location_value_op_iterator(
+      LocOpIterImpl::IsVAMFilterIter(Begin, End, &LocOpIterImpl::IsVAM),
+      &LocOpIterImpl::GetValue);
+}
+
 const DIExpression::FragmentInfo DebugVariable::DefaultFragment = {
     std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
 
@@ -2188,8 +2211,7 @@ DIMacroFile *DIMacroFile::getImpl(LLVMContext &Context, unsigned MIType,
   DEFINE_GETIMPL_STORE(DIMacroFile, (MIType, Line), Ops);
 }
 
-DIArgList *DIArgList::getImpl(LLVMContext &Context,
-                              ArrayRef<ValueAsMetadata *> Args,
+DIArgList *DIArgList::getImpl(LLVMContext &Context, ArrayRef<Metadata *> Args,
                               StorageType Storage, bool ShouldCreate) {
   assert(Storage != Distinct && "DIArgList cannot be distinct");
   DEFINE_GETIMPL_LOOKUP(DIArgList, (Args));
@@ -2197,9 +2219,7 @@ DIArgList *DIArgList::getImpl(LLVMContext &Context,
 }
 
 void DIArgList::handleChangedOperand(void *Ref, Metadata *New) {
-  ValueAsMetadata **OldVMPtr = static_cast<ValueAsMetadata **>(Ref);
-  assert((!New || isa<ValueAsMetadata>(New)) &&
-         "DIArgList must be passed a ValueAsMetadata");
+  Metadata **OldMPtr = static_cast<Metadata **>(Ref);
   untrack();
   bool Uniq = isUniqued();
   if (Uniq) {
@@ -2207,13 +2227,19 @@ void DIArgList::handleChangedOperand(void *Ref, Metadata *New) {
     // form the key to the DIArgLists store.
     eraseFromStore();
   }
-  ValueAsMetadata *NewVM = cast_or_null<ValueAsMetadata>(New);
-  for (ValueAsMetadata *&VM : Args) {
-    if (&VM == OldVMPtr) {
-      if (NewVM)
-        VM = NewVM;
-      else
-        VM = ValueAsMetadata::get(PoisonValue::get(VM->getValue()->getType()));
+  for (Metadata *&M : Args) {
+    if (&M == OldMPtr) {
+      if (New) {
+        M = New;
+      } else {
+        Type *Ty;
+        if (auto *VAM = dyn_cast<ValueAsMetadata>(M)) {
+          Ty = VAM->getValue()->getType();
+        } else {
+          Ty = cast<DIFragment>(M)->getType();
+        }
+        M = ValueAsMetadata::get(PoisonValue::get(Ty));
+      }
     }
   }
   if (Uniq) {
@@ -2223,14 +2249,14 @@ void DIArgList::handleChangedOperand(void *Ref, Metadata *New) {
   track();
 }
 void DIArgList::track() {
-  for (ValueAsMetadata *&VAM : Args)
-    if (VAM)
-      MetadataTracking::track(&VAM, *VAM, *this);
+  for (Metadata *&M : Args)
+    if (isa_and_nonnull<ValueAsMetadata>(M))
+      MetadataTracking::track(&M, *M, *this);
 }
 void DIArgList::untrack() {
-  for (ValueAsMetadata *&VAM : Args)
-    if (VAM)
-      MetadataTracking::untrack(&VAM, *VAM);
+  for (Metadata *&M : Args)
+    if (isa_and_nonnull<ValueAsMetadata>(M))
+      MetadataTracking::untrack(&M, *M);
 }
 void DIArgList::dropAllReferences() {
   untrack();

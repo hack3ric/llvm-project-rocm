@@ -675,11 +675,15 @@ bool diagnoseMisSizedDbgValue(Module &M, DbgValueInst *DVI) {
   if (DVI->getExpression()->getNumElements())
     return false;
 
-  Value *V = DVI->getVariableLocationOp(0);
-  if (!V)
+  Metadata *MD = DVI->getVariableLocationOp(0);
+  if (!MD)
     return false;
+  Type *Ty;
+  if (auto *VAM = dyn_cast<ValueAsMetadata>(MD))
+    Ty = VAM->getValue()->getType();
+  else
+    Ty = cast<DIFragment>(MD)->getType();
 
-  Type *Ty = V->getType();
   uint64_t ValueOperandSize = getAllocSizeInBits(M, Ty);
   std::optional<uint64_t> DbgVarSize = DVI->getFragmentSizeInBits();
   if (!ValueOperandSize || !DbgVarSize)

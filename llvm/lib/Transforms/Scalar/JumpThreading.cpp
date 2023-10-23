@@ -2023,7 +2023,7 @@ JumpThreadingPass::cloneInstructions(BasicBlock::iterator BI,
       return false;
 
     SmallSet<std::pair<Value *, Value *>, 16> OperandsToRemap;
-    for (auto DbgOperand : DbgInstruction->location_ops()) {
+    for (auto DbgOperand : DbgInstruction->location_value_ops()) {
       auto DbgOperandInstruction = dyn_cast<Instruction>(DbgOperand);
       if (!DbgOperandInstruction)
         continue;

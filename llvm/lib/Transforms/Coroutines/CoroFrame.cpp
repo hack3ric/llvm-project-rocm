@@ -2811,7 +2811,8 @@ void coro::salvageDebugInfo(
   // Follow the pointer arithmetic all the way to the incoming
   // function argument and convert into a DIExpression.
   bool SkipOutermostLoad = !isa<DbgValueInst>(DVI);
-  Value *Storage = DVI->getVariableLocationOp(0);
+  // FIXME:
+  Value *Storage = DVI->getVariableLocationOpAsValue(0);
   Value *OriginalStorage = Storage;
 
   while (auto *Inst = dyn_cast_or_null<Instruction>(Storage)) {

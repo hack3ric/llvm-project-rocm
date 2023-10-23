@@ -1166,7 +1166,8 @@ void SelectionDAGBuilder::visit(const Instruction &I) {
         handleKillDebugValue(Var, It->Expr, It->DL, SDNodeOrder);
         continue;
       }
-      SmallVector<Value *> Values(It->Values.location_ops());
+      // FIXME: This is wrong and drops DIFragment
+      SmallVector<Value *> Values(It->Values.location_value_ops());
       if (!handleDebugValue(Values, Var, It->Expr, It->DL, SDNodeOrder,
                             It->Values.hasArgList()))
         addDanglingDebugInfo(It, SDNodeOrder);
@@ -1238,7 +1239,8 @@ static bool handleDanglingVariadicDebugInfo(SelectionDAG &DAG,
   // For variadic dbg_values we will now insert an undef.
   // FIXME: We can potentially recover these!
   SmallVector<SDDbgOperand, 2> Locs;
-  for (const Value *V : Values.location_ops()) {
+  // FIXME: This is wrong and just drops DIFragment
+  for (const Value *V : Values.location_value_ops()) {
     auto *Undef = UndefValue::get(V->getType());
     Locs.push_back(SDDbgOperand::fromConst(Undef));
   }
@@ -1257,7 +1259,8 @@ void SelectionDAGBuilder::addDanglingDebugInfo(const VarLocInfo *VarLoc,
                                             ->getVariable(VarLoc->VariableID)
                                             .getVariable()),
           VarLoc->DL, Order, VarLoc->Values, VarLoc->Expr)) {
-    DanglingDebugInfoMap[VarLoc->Values.getVariableLocationOp(0)].emplace_back(
+    // FIXME:
+    DanglingDebugInfoMap[VarLoc->Values.getVariableLocationOpAsValue(0)].emplace_back(
         VarLoc, Order);
   }
 }
@@ -6201,7 +6204,8 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     LLVM_DEBUG(dbgs() << "SelectionDAG visiting debug intrinsic: " << DI
                       << "\n");
     // Check if address has undef value.
-    const Value *Address = DI.getVariableLocationOp(0);
+    // FIXME:
+    const Value *Address = DI.getVariableLocationOpAsValue(0);
     if (!Address || isa<UndefValue>(Address) ||
         (Address->use_empty() && !isa<Argument>(Address))) {
       LLVM_DEBUG(dbgs() << "Dropping debug info for " << DI
@@ -6285,7 +6289,8 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
       return;
     }
 
-    SmallVector<Value *, 4> Values(DI.getValues());
+    // FIXME: this drops DIFragment
+    SmallVector<Value *, 4> Values(DI.location_value_ops());
     if (Values.empty())
       return;
 

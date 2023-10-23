@@ -1947,7 +1947,8 @@ bool IRTranslator::translateIfEntryValueArgument(const DbgValueInst &DebugInst,
 
 bool IRTranslator::translateIfEntryValueArgument(
     const DbgDeclareInst &DebugInst) {
-  auto *Arg = dyn_cast<Argument>(DebugInst.getAddress());
+  // FIXME:
+  auto *Arg = dyn_cast<Argument>(DebugInst.getAddressAsValue());
   if (!Arg)
     return false;
 
@@ -2017,7 +2018,8 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     const DbgDeclareInst &DI = cast<DbgDeclareInst>(CI);
     assert(DI.getVariable() && "Missing variable");
 
-    const Value *Address = DI.getAddress();
+    // FIXME:
+    const Value *Address = DI.getAddressAsValue();
     if (!Address || isa<UndefValue>(Address)) {
       LLVM_DEBUG(dbgs() << "Dropping debug info for " << DI << "\n");
       return true;

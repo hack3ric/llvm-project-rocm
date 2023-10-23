@@ -3126,8 +3126,9 @@ private:
       if (IsDest) {
         // Update the address component of linked dbg.assigns.
         for (auto *DAI : at::getAssignmentMarkers(&II)) {
-          if (llvm::is_contained(DAI->location_ops(), II.getDest()) ||
-              DAI->getAddress() == II.getDest())
+          if (llvm::is_contained(DAI->location_value_ops(), II.getDest()) ||
+              // FIXME:
+              DAI->getAddressAsValue() == II.getDest())
             DAI->replaceVariableLocationOp(II.getDest(), AdjustedPtr);
         }
         II.setDest(AdjustedPtr);

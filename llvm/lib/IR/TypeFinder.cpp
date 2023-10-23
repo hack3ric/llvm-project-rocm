@@ -171,8 +171,8 @@ void TypeFinder::incorporateMDNode(const MDNode *V) {
   // The arguments in DIArgList are not exposed as operands, so handle such
   // nodes specifically here.
   if (const auto *AL = dyn_cast<DIArgList>(V)) {
-    for (auto *Arg : AL->getArgs())
-      incorporateValue(Arg->getValue());
+    for (auto *Arg : AL->value_args())
+      incorporateValue(Arg);
     return;
   }
 

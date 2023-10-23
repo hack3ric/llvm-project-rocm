@@ -1211,7 +1211,8 @@ bool FastISel::selectIntrinsicCall(const IntrinsicInst *II) {
     if (FuncInfo.PreprocessedDbgDeclares.contains(DI))
       return true;
 
-    const Value *Address = DI->getAddress();
+    // FIXME:
+    const Value *Address = DI->getAddressAsValue();
     if (!Address || isa<UndefValue>(Address)) {
       LLVM_DEBUG(dbgs() << "Dropping debug info for " << *DI
                         << " (bad/undef address)\n");
