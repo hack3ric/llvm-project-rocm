@@ -5180,8 +5180,6 @@ void Verifier::visitIntrinsicCall(Intrinsic::ID ID, CallBase &Call) {
     visitConstrainedFPIntrinsic(cast<ConstrainedFPIntrinsic>(Call));
     break;
   case Intrinsic::dbg_declare: // llvm.dbg.declare
-    Check(isa<MetadataAsValue>(Call.getArgOperand(0)),
-          "invalid llvm.dbg.declare intrinsic call 1", Call);
     visitDbgIntrinsic("declare", cast<DbgVariableIntrinsic>(Call));
     break;
   case Intrinsic::dbg_value: // llvm.dbg.value
@@ -6273,7 +6271,8 @@ void Verifier::visitDbgIntrinsic(StringRef Kind, DbgVariableIntrinsic &DII) {
   CheckDI(isa<DILocalVariable>(DII.getRawVariable()),
           "invalid llvm.dbg." + Kind + " intrinsic variable", &DII,
           DII.getRawVariable());
-  CheckDI(isa<DIExpression>(DII.getRawExpression()),
+  CheckDI(isa<DIExpression>(DII.getRawExpression()) ||
+              isa<DIExpr>(DII.getRawExpression()),
           "invalid llvm.dbg." + Kind + " intrinsic expression", &DII,
           DII.getRawExpression());
 
