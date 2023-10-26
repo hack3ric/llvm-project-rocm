@@ -2236,3 +2236,158 @@ PreservedAnalyses AssignmentTrackingPass::run(Module &M,
 }
 
 #undef DEBUG_TYPE
+#define DEBUG_TYPE "assignment-tracking"
+
+struct OrderedFragment {
+  DIFragment *Fragment;
+  uint64_t SizeInBits;
+  uint64_t OffsetInBits;
+  friend bool operator<(const OrderedFragment &, const OrderedFragment &);
+};
+
+bool operator<(const OrderedFragment &LHS, const OrderedFragment &RHS) {
+  return LHS.OffsetInBits < RHS.OffsetInBits;
+}
+
+bool ExperimentalFragmentsPass::runOnFunction(Function &F) {
+  bool Changed = false;
+  auto &Context = F.getParent()->getContext();
+  DIBuilder DIB(*F.getParent(), /*AllowUnresolved*/ false);
+
+  DenseMap<DILocalVariable *, std::set<OrderedFragment>> Var2OrderedFragments;
+
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      if (!isa<DbgVariableIntrinsic>(&I))
+        continue;
+      auto *DDI = dyn_cast<DbgDeclareInst>(&I);
+      assert(DDI && "Only dbg.declare should be generated in frontend?");
+      EitherDIExpr EitherExpr = DDI->getEitherDIExpr();
+      DIExpression **OptExpr = std::get_if<DIExpression *>(&EitherExpr);
+      if (!OptExpr)
+        continue;
+      DIExpression *OldExpr = *OptExpr;
+      auto *Var = dyn_cast<DILocalVariable>(DDI->getObject());
+      assert(Var);
+      if (auto FragInfo = DDI->getFragment()) {
+        uint64_t FragBitSize = FragInfo->endInBits() - FragInfo->startInBits();
+        DIFragment *DIFrag = DIFragment::getDistinct(
+            Context, IntegerType::get(Context, FragBitSize));
+        DDI->setObject(DIFrag);
+        auto &Set = Var2OrderedFragments.getOrInsertDefault(Var);
+        Set.insert({DIFrag, FragInfo->SizeInBits, FragInfo->OffsetInBits});
+      }
+      ArrayRef<uint64_t> Ops = OldExpr->getElements();
+      DIExprBuilder Expr{Context};
+      AllocaInst *Alloca = cast<AllocaInst>(DDI->getAddressAsValue());
+      Expr.append<DIOp::Arg>(0, Alloca->getType());
+      for (size_t I = 0; I < Ops.size(); ++I) {
+        if (Ops[I] == DW_OP_LLVM_fragment)
+          break;
+        switch (Ops[I]) {
+        // TODO: support all ops
+        case DW_OP_deref:
+          Expr.append<DIOp::Read>();
+          break;
+        default:
+          assert(false);
+          break;
+        }
+      }
+      Expr.append<DIOp::Deref>(Alloca->getAllocatedType());
+      DDI->setEitherDIExpr(EitherDIExpr{Expr.intoExpr()});
+    }
+  }
+
+  Instruction *FirstInstr = &*F.getEntryBlock().begin();
+  for (auto [Var, OrderedFragments] : Var2OrderedFragments) {
+    DIExprBuilder Expr{Context};
+    SmallVector<Metadata *> ArgsVec;
+    // TODO: Build up the expression combining the fragments
+    unsigned Parts = 0;
+    unsigned LastOffset = 0;
+    auto FillGap = [&](uint64_t NextOffset) {
+      if (NextOffset > LastOffset) {
+        ++Parts;
+        auto *T = Type::getIntNTy(Context, NextOffset - LastOffset);
+        Expr.append<DIOp::Constant>(UndefValue::get(T));
+        LastOffset = NextOffset;
+      }
+    };
+    for (auto [Index, OrderedFrag] : enumerate(OrderedFragments)) {
+      FillGap(OrderedFrag.OffsetInBits);
+      ++Parts;
+      ArgsVec.push_back(OrderedFrag.Fragment);
+      Expr.append<DIOp::Arg>(Index,
+                             Type::getIntNTy(Context, OrderedFrag.SizeInBits));
+      LastOffset = OrderedFrag.OffsetInBits + OrderedFrag.SizeInBits;
+    }
+    FillGap(Var->getType()->getSizeInBits());
+    Expr.append<DIOp::Composite>(Parts, IntegerType::get(Context, LastOffset));
+    auto *Args = DIArgList::get(Context, ArgsVec);
+    auto *Declare = static_cast<DbgDeclareInst *>(DIB.insertDeclare(
+        Constant::getNullValue(Type::getInt1Ty(Context)), Var,
+        EitherDIExpr{Expr.intoExpr()},
+        DILocation::get(Context, 0, 0, F.getSubprogram()), FirstInstr));
+    // FIXME: Add support for DIArgList to DIBuilder instead
+    Declare->setRawLocation(Args);
+  }
+
+  return Changed;
+}
+
+static const char *ExperimentalFragmentsModuleFlag =
+    "debug-info-experimental-fragments";
+
+static void setExperimentalFragmentsModuleFlag(Module &M) {
+  M.setModuleFlag(Module::ModFlagBehavior::Max, ExperimentalFragmentsModuleFlag,
+                  ConstantAsMetadata::get(
+                      ConstantInt::get(Type::getInt1Ty(M.getContext()), 1)));
+}
+
+static bool getExperimentalFragmentsModuleFlag(const Module &M) {
+  Metadata *Value = M.getModuleFlag(ExperimentalFragmentsModuleFlag);
+  return Value && !cast<ConstantAsMetadata>(Value)->getValue()->isZeroValue();
+}
+
+bool llvm::isExperimentalFragmentsEnabled(const Module &M) {
+  return getExperimentalFragmentsModuleFlag(M);
+}
+
+PreservedAnalyses ExperimentalFragmentsPass::run(Function &F,
+                                              FunctionAnalysisManager &AM) {
+  if (!runOnFunction(F))
+    return PreservedAnalyses::all();
+
+  // Record that this module uses assignment tracking. It doesn't matter that
+  // some functons in the module may not use it - the debug info in those
+  // functions will still be handled properly.
+  setExperimentalFragmentsModuleFlag(*F.getParent());
+
+  // Q: Can we return a less conservative set than just CFGAnalyses? Can we
+  // return PreservedAnalyses::all()?
+  PreservedAnalyses PA;
+  PA.preserveSet<CFGAnalyses>();
+  return PA;
+}
+
+PreservedAnalyses ExperimentalFragmentsPass::run(Module &M,
+                                              ModuleAnalysisManager &AM) {
+  bool Changed = false;
+  for (auto &F : M)
+    Changed |= runOnFunction(F);
+
+  if (!Changed)
+    return PreservedAnalyses::all();
+
+  // Record that this module uses assignment tracking.
+  setExperimentalFragmentsModuleFlag(M);
+
+  // Q: Can we return a less conservative set than just CFGAnalyses? Can we
+  // return PreservedAnalyses::all()?
+  PreservedAnalyses PA;
+  PA.preserveSet<CFGAnalyses>();
+  return PA;
+}
+
+#undef DEBUG_TYPE

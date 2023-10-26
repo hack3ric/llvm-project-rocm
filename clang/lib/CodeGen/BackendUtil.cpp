@@ -859,6 +859,13 @@ void EmitAssemblyHelper::RunOptimizationPipeline(
   SI.registerCallbacks(PIC, &MAM);
   PassBuilder PB(TM.get(), PTO, PGOOpt, &PIC);
 
+  if (CodeGenOpts.ExperimentalDebugFragments) {
+    PB.registerPipelineStartEPCallback(
+        [&](ModulePassManager &MPM, OptimizationLevel Level) {
+          MPM.addPass(ExperimentalFragmentsPass());
+        });
+  }
+
   // Handle the assignment tracking feature options.
   switch (CodeGenOpts.getAssignmentTrackingMode()) {
   case CodeGenOptions::AssignmentTrackingOpts::Forced:
