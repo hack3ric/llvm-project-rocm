@@ -307,13 +307,26 @@ public:
   void addVariableLocationOps(ArrayRef<Value *> NewValues,
                               DIExpression *NewExpr);
 
-  void setVariable(DILocalVariable *NewVar) {
-    setArgOperand(1, MetadataAsValue::get(NewVar->getContext(), NewVar));
+  void setObject(DIObject *NewObj) {
+    setArgOperand(1, MetadataAsValue::get(NewObj->getContext(), NewObj));
   }
 
-  void setExpression(DIExpression *NewExpr) {
-    setArgOperand(2, MetadataAsValue::get(NewExpr->getContext(), NewExpr));
+#ifndef EXPERIMENTAL_FRAGMENTS_ONLY
+  void setVariable(DILocalVariable *NewVar) {
+    setObject(NewVar);
   }
+#endif
+
+  void setEitherDIExpr(EitherDIExpr NewExpr) {
+    MDNode *Node = NewExpr.getMDNode();
+    setArgOperand(2, MetadataAsValue::get(Node->getContext(), Node));
+  }
+
+#ifndef EXPERIMENTAL_FRAGMENTS_ONLY
+  void setExpression(DIExpression *NewExpr) {
+    setEitherDIExpr(EitherDIExpr{NewExpr});
+  }
+#endif
 
   unsigned getNumVariableLocationOps() const {
     return getWrappedLocation().getNumVariableLocationOps();
@@ -344,13 +357,30 @@ public:
     return getWrappedLocation().isKillLocation(getExpression());
   }
 
+  DIObject *getObject() const {
+    return cast<DIObject>(getRawObject());
+  }
+
+#ifndef EXPERIMENTAL_FRAGMENTS_ONLY
   DILocalVariable *getVariable() const {
     return cast<DILocalVariable>(getRawVariable());
   }
+#endif
 
-  DIExpression *getExpression() const {
-    return cast<DIExpression>(getRawExpression());
+  EitherDIExpr getEitherDIExpr() const {
+    if (auto *E = dyn_cast<DIExpression>(getRawEitherExpr()))
+      return EitherDIExpr{E};
+    auto *E = cast<DIExpr>(getRawEitherExpr());
+    return EitherDIExpr{E};
   }
+
+#ifndef EXPERIMENTAL_FRAGMENTS_ONLY
+  DIExpression *getExpression() const {
+    auto E = getEitherDIExpr();
+    assert(std::holds_alternative<DIExpression *>(E));
+    return std::get<DIExpression *>(E);
+  }
+#endif
 
   Metadata *getRawLocation() const {
     return cast<MetadataAsValue>(getArgOperand(0))->getMetadata();
@@ -360,13 +390,25 @@ public:
     return RawLocationWrapper(getRawLocation());
   }
 
-  Metadata *getRawVariable() const {
+  Metadata *getRawObject() const {
     return cast<MetadataAsValue>(getArgOperand(1))->getMetadata();
   }
 
-  Metadata *getRawExpression() const {
+#ifndef EXPERIMENTAL_FRAGMENTS_ONLY
+  Metadata *getRawVariable() const {
+    return getRawObject();
+  }
+#endif
+
+  Metadata *getRawEitherExpr() const {
     return cast<MetadataAsValue>(getArgOperand(2))->getMetadata();
   }
+
+#ifndef EXPERIMENTAL_FRAGMENTS_ONLY
+  Metadata *getRawExpression() const {
+    return getRawEitherExpr();
+  }
+#endif
 
   /// Use of this should generally be avoided; instead,
   /// replaceVariableLocationOp and addVariableLocationOps should be used where

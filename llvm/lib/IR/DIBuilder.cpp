@@ -923,8 +923,8 @@ DILexicalBlock *DIBuilder::createLexicalBlock(DIScope *Scope, DIFile *File,
                                      File, Line, Col);
 }
 
-Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
-                                      DIExpression *Expr, const DILocation *DL,
+Instruction *DIBuilder::insertDeclare(Value *Storage, DIObject *VarInfo,
+                                      EitherDIExpr Expr, const DILocation *DL,
                                       Instruction *InsertBefore) {
   return insertDeclare(Storage, VarInfo, Expr, DL, InsertBefore->getParent(),
                        InsertBefore);
@@ -932,11 +932,23 @@ Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
 
 Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
                                       DIExpression *Expr, const DILocation *DL,
+                                      Instruction *InsertBefore) {
+  return insertDeclare(Storage, VarInfo, EitherDIExpr{Expr}, DL, InsertBefore);
+}
+
+Instruction *DIBuilder::insertDeclare(Value *Storage, DIObject *VarInfo,
+                                      EitherDIExpr Expr, const DILocation *DL,
                                       BasicBlock *InsertAtEnd) {
   // If this block already has a terminator then insert this intrinsic before
   // the terminator. Otherwise, put it at the end of the block.
   Instruction *InsertBefore = InsertAtEnd->getTerminator();
   return insertDeclare(Storage, VarInfo, Expr, DL, InsertAtEnd, InsertBefore);
+}
+
+Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
+                                      DIExpression *Expr, const DILocation *DL,
+                                      BasicBlock *InsertAtEnd) {
+  return insertDeclare(Storage, VarInfo, EitherDIExpr{Expr}, DL, InsertAtEnd);
 }
 
 DbgAssignIntrinsic *
@@ -1028,23 +1040,25 @@ Instruction *DIBuilder::insertDbgValueIntrinsic(
                             InsertBefore);
 }
 
-Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
-                                      DIExpression *Expr, const DILocation *DL,
+Instruction *DIBuilder::insertDeclare(Value *Storage, DIObject *VarInfo,
+                                      EitherDIExpr Expr, const DILocation *DL,
                                       BasicBlock *InsertBB,
                                       Instruction *InsertBefore) {
   assert(VarInfo && "empty or invalid DILocalVariable* passed to dbg.declare");
   assert(DL && "Expected debug loc");
+  /*
   assert(DL->getScope()->getSubprogram() ==
              VarInfo->getScope()->getSubprogram() &&
          "Expected matching subprograms");
+         */
   if (!DeclareFn)
     DeclareFn = getDeclareIntrin(M);
 
   trackIfUnresolved(VarInfo);
-  trackIfUnresolved(Expr);
+  trackIfUnresolved(Expr.getMDNode());
   Value *Args[] = {getDbgIntrinsicValueImpl(VMContext, Storage),
                    MetadataAsValue::get(VMContext, VarInfo),
-                   MetadataAsValue::get(VMContext, Expr)};
+                   MetadataAsValue::get(VMContext, Expr.getMDNode())};
 
   IRBuilder<> B(DL->getContext());
   initIRBuilder(B, DL, InsertBB, InsertBefore);

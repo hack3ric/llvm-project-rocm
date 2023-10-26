@@ -4246,6 +4246,19 @@ public:
 template <>
 struct DenseMapInfo<DebugVariableAggregate>
     : public DenseMapInfo<DebugVariable> {};
+
+class EitherDIExpr : public std::variant<DIExpression *, DIExpr *> {
+  using VariantT = std::variant<DIExpression *, DIExpr *>;
+
+public:
+  VariantT &asVariant() { return *static_cast<VariantT *>(this); }
+  const VariantT &asVariant() const {
+    return *static_cast<const VariantT *>(this);
+  }
+  MDNode *getMDNode() const {
+    return visit([](auto &A) { return static_cast<MDNode *>(A); }, asVariant());
+  }
+};
 } // end namespace llvm
 
 #undef DEFINE_MDNODE_GET_UNPACK_IMPL

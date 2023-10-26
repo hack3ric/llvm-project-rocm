@@ -341,6 +341,18 @@ public:
 /// Return true if assignment tracking is enabled for module \p M.
 bool isAssignmentTrackingEnabled(const Module &M);
 
+class ExperimentalFragmentsPass : public PassInfoMixin<ExperimentalFragmentsPass> {
+  /// Note: this method does not set the debug-info-assignment-tracking module
+  /// flag.
+  bool runOnFunction(Function &F);
+
+public:
+  PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
+
+/// Return true if assignment tracking is enabled for module \p M.
+bool isExperimentalFragmentsEnabled(const Module &M);
 } // end namespace llvm
 
 #endif // LLVM_IR_DEBUGINFO_H

@@ -90,8 +90,8 @@ namespace llvm {
     void trackIfUnresolved(MDNode *N);
 
     /// Internal helper for insertDeclare.
-    Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
-                               DIExpression *Expr, const DILocation *DL,
+    Instruction *insertDeclare(llvm::Value *Storage, DIObject *VarInfo,
+                               EitherDIExpr Expr, const DILocation *DL,
                                BasicBlock *InsertBB, Instruction *InsertBefore);
 
     /// Internal helper for insertLabel.
@@ -917,7 +917,11 @@ namespace llvm {
     /// \param Expr        A complex location expression.
     /// \param DL          Debug info location.
     /// \param InsertAtEnd Location for the new intrinsic.
-    Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
+    Instruction *insertDeclare(llvm::Value *Storage, DIObject *VarInfo,
+                               EitherDIExpr Expr, const DILocation *DL,
+                               BasicBlock *InsertAtEnd);
+
+    Instruction *insertDeclare(Value *Storage, DILocalVariable *VarInfo,
                                DIExpression *Expr, const DILocation *DL,
                                BasicBlock *InsertAtEnd);
 
@@ -947,6 +951,10 @@ namespace llvm {
     /// \param Expr         A complex location expression.
     /// \param DL           Debug info location.
     /// \param InsertBefore Location for the new intrinsic.
+    Instruction *insertDeclare(llvm::Value *Storage, DIObject *VarInfo,
+                               EitherDIExpr Expr, const DILocation *DL,
+                               Instruction *InsertBefore);
+
     Instruction *insertDeclare(llvm::Value *Storage, DILocalVariable *VarInfo,
                                DIExpression *Expr, const DILocation *DL,
                                Instruction *InsertBefore);
