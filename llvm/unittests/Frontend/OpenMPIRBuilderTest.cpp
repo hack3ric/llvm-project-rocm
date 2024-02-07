@@ -600,6 +600,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelSimpleGPU) {
       "256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8");
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = true;
+  OMPBuilder.Config.IsGPU = true;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -707,6 +708,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelSimple) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -812,6 +814,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelNested) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -906,6 +909,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelNested2Inner) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -1015,6 +1019,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelIfCond) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -1120,6 +1125,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelCancelBarrier) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -1234,6 +1240,7 @@ TEST_F(OpenMPIRBuilderTest, ParallelCancelBarrier) {
 TEST_F(OpenMPIRBuilderTest, ParallelForwardAsPointers) {
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -2237,6 +2244,7 @@ TEST_F(OpenMPIRBuilderTest, StaticWorkshareLoopTarget) {
       "256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1-ni:7:8");
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = true;
+  OMPBuilder.Config.IsGPU = true;
   OMPBuilder.initialize();
   IRBuilder<> Builder(BB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
@@ -2291,14 +2299,21 @@ TEST_F(OpenMPIRBuilderTest, StaticWorkshareLoopTarget) {
   // Check that no variables except for loop counter are used in loop body
   EXPECT_EQ(Constant::getNullValue(Builder.getPtrTy()),
             WorkshareLoopRuntimeCall->getArgOperand(2));
-  // Check loop trip count argument
-  EXPECT_EQ(TripCount, WorkshareLoopRuntimeCall->getArgOperand(3));
+  // Check loop trip count argument.
+  ConstantInt *TripCountConstInt = dyn_cast<ConstantInt>(TripCount);
+  EXPECT_NE(TripCountConstInt, nullptr);
+  ConstantInt *WorkshareLoopRuntimeCallTripCount =
+      dyn_cast<ConstantInt>(WorkshareLoopRuntimeCall->getArgOperand(3));
+  EXPECT_NE(WorkshareLoopRuntimeCallTripCount, nullptr);
+  EXPECT_EQ(WorkshareLoopRuntimeCallTripCount->getSExtValue() + 1,
+            TripCountConstInt->getSExtValue());
 }
 
 TEST_F(OpenMPIRBuilderTest, StaticWorkShareLoop) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   IRBuilder<> Builder(BB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
@@ -2400,6 +2415,7 @@ TEST_P(OpenMPIRBuilderTestWithIVBits, StaticChunkedWorkshareLoop) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
 
   BasicBlock *Body;
   CallInst *Call;
@@ -2475,6 +2491,7 @@ TEST_P(OpenMPIRBuilderTestWithParams, DynamicWorkShareLoop) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   IRBuilder<> Builder(BB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
@@ -2633,6 +2650,7 @@ TEST_F(OpenMPIRBuilderTest, DynamicWorkShareLoopOrdered) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   IRBuilder<> Builder(BB);
   OpenMPIRBuilder::LocationDescription Loc({Builder.saveIP(), DL});
@@ -4191,6 +4209,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeams) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -4267,6 +4286,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithThreadLimit) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4318,6 +4338,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsUpper) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4370,6 +4391,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsBoth) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4425,6 +4447,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithNumTeamsAndThreadLimit) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4485,6 +4508,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithIfCondition) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4544,6 +4568,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTeamsWithIfConditionAndNumTeams) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> &Builder = OMPBuilder.Builder;
@@ -4742,6 +4767,7 @@ TEST_F(OpenMPIRBuilderTest, CreateReductions) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -4975,6 +5001,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTwoReductions) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -5804,7 +5831,9 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
   TargetRegionEntryInfo EntryInfo("func", 42, 4711, 17);
   OpenMPIRBuilder::LocationDescription OmpLoc({Builder.saveIP(), DL});
   Builder.restoreIP(OMPBuilder.createTarget(
-      OmpLoc, Builder.saveIP(), Builder.saveIP(), EntryInfo, -1, 0, Inputs,
+      OmpLoc, /*IsSPMD=*/false, Builder.saveIP(), Builder.saveIP(), EntryInfo,
+      /*DefaultBounds=*/OpenMPIRBuilder::TargetKernelDefaultBounds(),
+      /*RuntimeBounds=*/OpenMPIRBuilder::TargetKernelRuntimeBounds(), Inputs,
       GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
   OMPBuilder.finalize();
   Builder.CreateRetVoid();
@@ -5844,6 +5873,7 @@ TEST_F(OpenMPIRBuilderTest, TargetRegion) {
 }
 
 TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
+  M->setTargetTriple("amdgcn-amd-amdhsa");
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.setConfig(
       OpenMPIRBuilderConfig(true, false, false, false, false, false, false));
@@ -5907,10 +5937,11 @@ TEST_F(OpenMPIRBuilderTest, TargetRegionDevice) {
   TargetRegionEntryInfo EntryInfo("parent", /*DeviceID=*/1, /*FileID=*/2,
                                   /*Line=*/3, /*Count=*/0);
 
-  Builder.restoreIP(
-      OMPBuilder.createTarget(Loc, EntryIP, EntryIP, EntryInfo, /*NumTeams=*/-1,
-                              /*NumThreads=*/0, CapturedArgs, GenMapInfoCB,
-                              BodyGenCB, SimpleArgAccessorCB));
+  Builder.restoreIP(OMPBuilder.createTarget(
+      Loc, /*IsSPMD=*/false, EntryIP, EntryIP, EntryInfo,
+      /*DefaultBounds=*/OpenMPIRBuilder::TargetKernelDefaultBounds(),
+      /*RuntimeBounds=*/OpenMPIRBuilder::TargetKernelRuntimeBounds(),
+      CapturedArgs, GenMapInfoCB, BodyGenCB, SimpleArgAccessorCB));
 
   Builder.CreateRetVoid();
   OMPBuilder.finalize();
@@ -5993,6 +6024,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTask) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -6122,6 +6154,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskNoArgs) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -6153,6 +6186,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskUntied) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -6183,6 +6217,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskDepend) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -6257,6 +6292,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskFinal) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -6311,6 +6347,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskIfCondition) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);
@@ -6472,6 +6509,7 @@ TEST_F(OpenMPIRBuilderTest, CreateTaskgroupWithTasks) {
   using InsertPointTy = OpenMPIRBuilder::InsertPointTy;
   OpenMPIRBuilder OMPBuilder(*M);
   OMPBuilder.Config.IsTargetDevice = false;
+  OMPBuilder.Config.IsGPU = false;
   OMPBuilder.initialize();
   F->setName("func");
   IRBuilder<> Builder(BB);

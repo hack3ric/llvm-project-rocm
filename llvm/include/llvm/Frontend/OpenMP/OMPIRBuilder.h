@@ -16,6 +16,7 @@
 
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
+#include "llvm/Frontend/OpenMP/OMPGridValues.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/Allocator.h"
@@ -99,13 +100,17 @@ public:
   /// expanded.
   std::optional<bool> IsGPU;
 
-  // Flag for specifying if offloading is mandatory.
+  /// Flag for specifying if offloading is mandatory.
   std::optional<bool> OpenMPOffloadMandatory;
 
   /// First separator used between the initial two parts of a name.
   std::optional<StringRef> FirstSeparator;
-  /// Separator used between all of the rest consecutive parts of s name
+
+  /// Separator used between all of the rest consecutive parts of a name
   std::optional<StringRef> Separator;
+
+  // Grid Value for the GPU target
+  std::optional<omp::GV> GridValue;
 
   OpenMPIRBuilderConfig();
   OpenMPIRBuilderConfig(bool IsTargetDevice, bool IsGPU,
@@ -130,6 +135,11 @@ public:
     assert(OpenMPOffloadMandatory.has_value() &&
            "OpenMPOffloadMandatory is not set");
     return *OpenMPOffloadMandatory;
+  }
+
+  omp::GV getGridValue() const {
+    assert(GridValue.has_value() && "GridValue is not set");
+    return *GridValue;
   }
 
   bool hasRequiresFlags() const { return RequiresFlags; }
@@ -167,6 +177,7 @@ public:
   void setOpenMPOffloadMandatory(bool Value) { OpenMPOffloadMandatory = Value; }
   void setFirstSeparator(StringRef FS) { FirstSeparator = FS; }
   void setSeparator(StringRef S) { Separator = S; }
+  void setGridValue(omp::GV G) { GridValue = G; }
 
   void setHasRequiresReverseOffload(bool Value);
   void setHasRequiresUnifiedAddress(bool Value);
@@ -1233,18 +1244,26 @@ public:
   getTargetEntryUniqueInfo(FileIdentifierInfoCallbackTy CallBack,
                            StringRef ParentName = "");
 
+  // using ReductionGenTy =
+  //     function_ref<InsertPointTy(InsertPointTy, Value *, Value *, Value *&)>;
+
+  // using AtomicReductionGenTy =
+  //     function_ref<InsertPointTy(InsertPointTy, Type *, Value *, Value *)>;
+
+  /// Owning equivalents of OpenMPIRBuilder::(Atomic)ReductionGen that are used
+  /// to
+  /// store lambdas with capture.
   /// Functions used to generate reductions. Such functions take two Values
   /// representing LHS and RHS of the reduction, respectively, and a reference
   /// to the value that is updated to refer to the reduction result.
-  using ReductionGenTy =
-      function_ref<InsertPointTy(InsertPointTy, Value *, Value *, Value *&)>;
-
+  using ReductionGenTy = std::function<OpenMPIRBuilder::InsertPointTy(
+      OpenMPIRBuilder::InsertPointTy, Value *, Value *, Value *&)>;
   /// Functions used to generate atomic reductions. Such functions take two
   /// Values representing pointers to LHS and RHS of the reduction, as well as
   /// the element type of these pointers. They are expected to atomically
   /// update the LHS to the reduced value.
-  using AtomicReductionGenTy =
-      function_ref<InsertPointTy(InsertPointTy, Type *, Value *, Value *)>;
+  using AtomicReductionGenTy = std::function<OpenMPIRBuilder::InsertPointTy(
+      OpenMPIRBuilder::InsertPointTy, Type *, Value *, Value *)>;
 
   /// Information about an OpenMP reduction.
   struct ReductionInfo {
@@ -1254,6 +1273,10 @@ public:
         : ElementType(ElementType), Variable(Variable),
           PrivateVariable(PrivateVariable), ReductionGen(ReductionGen),
           AtomicReductionGen(AtomicReductionGen) {}
+    ReductionInfo(Value *PrivateVariable)
+        : ElementType(nullptr), Variable(nullptr),
+          PrivateVariable(PrivateVariable), ReductionGen(),
+          AtomicReductionGen() {}
 
     /// Reduction element type, must match pointee type of variable.
     Type *ElementType;
@@ -1275,6 +1298,71 @@ public:
     /// along with the appropriate synchronization mechanisms.
     AtomicReductionGenTy AtomicReductionGen;
   };
+
+  /// A class that manages the reduction info to facilitate lowering of
+  /// reductions at multiple levels of parallelism. For example handling teams
+  /// and parallel reductions on GPUs
+
+  class ReductionInfoManager {
+  private:
+    SmallVector<ReductionInfo> ReductionInfos;
+    std::optional<InsertPointTy> PrivateVarAllocaIP;
+
+  public:
+    ReductionInfoManager() {};
+    void clear() {
+      ReductionInfos.clear();
+      PrivateVarAllocaIP.reset();
+    }
+
+    Value *allocatePrivateReductionVar(
+        IRBuilderBase &builder,
+        llvm::OpenMPIRBuilder::InsertPointTy &allocaIP,
+        Type *VarType) {
+      llvm::Type *ptrTy = llvm::PointerType::getUnqual(builder.getContext());
+      llvm::Value *var = builder.CreateAlloca(VarType);
+      var->setName("private_redvar");
+      llvm::Value *castVar =
+        builder.CreatePointerBitCastOrAddrSpaceCast(var, ptrTy);
+      ReductionInfos.push_back(ReductionInfo(castVar));
+      return castVar;
+    }
+
+    ReductionInfo getReductionInfo(unsigned Index) {
+      return ReductionInfos[Index];
+    }
+    ReductionInfo setReductionInfo(unsigned Index, ReductionInfo &RI) {
+      return ReductionInfos[Index] = RI;
+    }
+    Value *getPrivateReductionVariable(unsigned Index) {
+      return ReductionInfos[Index].PrivateVariable;
+    }
+    SmallVector<ReductionInfo> &getReductionInfos() {
+      return ReductionInfos;
+    }
+
+    bool hasPrivateVarAllocaIP() { return PrivateVarAllocaIP.has_value(); }
+    InsertPointTy getPrivateVarAllocaIP() {
+      assert(PrivateVarAllocaIP.has_value() && "AllocaIP not set");
+      return *PrivateVarAllocaIP;
+    }
+    void setPrivateVarAllocaIP(InsertPointTy IP) { PrivateVarAllocaIP = IP; }
+  };
+
+  /// \param Loc                The location where the reduction was
+  ///                           encountered. Must be within the associate
+  ///                           directive and after the last local access to the
+  ///                           reduction variables.
+  /// \param AllocaIP           An insertion point suitable for allocas usable
+  ///                           in reductions.
+  /// \param ReductionInfos     A list of info on each reduction variable.
+  /// \param IsNoWait           A flag set if the reduction is marked as nowait.
+  InsertPointTy createReductionsGPU(const LocationDescription &Loc,
+                                    InsertPointTy AllocaIP,
+                                    ArrayRef<ReductionInfo> ReductionInfos,
+                                    bool IsNoWait = false,
+                                    bool IsTeamsReduction = false,
+                                    bool HasDistribute = false);
 
   // TODO: provide atomic and non-atomic reduction generators for reduction
   // operators defined by the OpenMP specification.
@@ -1340,7 +1428,9 @@ public:
   InsertPointTy createReductions(const LocationDescription &Loc,
                                  InsertPointTy AllocaIP,
                                  ArrayRef<ReductionInfo> ReductionInfos,
-                                 bool IsNoWait = false);
+                                 bool IsNoWait = false,
+                                 bool IsTeamsReduction = false,
+                                 bool HasDistribute = false);
 
   ///}
 
@@ -1492,6 +1582,9 @@ public:
   /// Info manager to keep track of target regions.
   OffloadEntriesInfoManager OffloadInfoManager;
 
+  /// Info manager to keep track of reduction information;
+  ReductionInfoManager RIManager;
+
   /// The target triple of the underlying module.
   const Triple T;
 
@@ -1618,6 +1711,31 @@ public:
           MapNamesArray(MapNamesArray) {}
   };
 
+  /// Container to pass the default bounds for the number of teams and threads
+  /// with which a kernel must be launched, used to set kernel attributes and
+  /// populate associated static structures.
+  struct TargetKernelDefaultBounds {
+    int32_t MinTeams = 1;
+    int32_t MaxTeams = -1;
+    int32_t MinThreads = 1;
+    int32_t MaxThreads = -1;
+    int32_t ReductionDataSize = 0;
+    int32_t ReductionBufferLength = 0;
+  };
+
+  /// Container to pass the runtime SSA values or constants related to the
+  /// number of teams and threads with which the kernel must be launched, as
+  /// well as the trip count of the loop. These must be defined in the host code
+  /// prior to the call to the kernel launch OpenMP RTL function.
+  struct TargetKernelRuntimeBounds {
+    Value *LoopTripCount = nullptr;
+    Value *TargetThreadLimit = nullptr;
+    Value *TeamsThreadLimit = nullptr;
+    Value *MinTeams = nullptr;
+    Value *MaxTeams = nullptr;
+    Value *MaxThreads = nullptr;
+  };
+
   /// Data structure that contains the needed information to construct the
   /// kernel args vector.
   struct TargetKernelArgs {
@@ -1626,7 +1744,7 @@ public:
     /// Arguments passed to the runtime library
     TargetDataRTArgs RTArgs;
     /// The number of iterations
-    Value *NumIterations;
+    Value *TripCount;
     /// The number of teams.
     Value *NumTeams;
     /// The number of threads.
@@ -1638,12 +1756,11 @@ public:
 
     /// Constructor for TargetKernelArgs
     TargetKernelArgs(unsigned NumTargetItems, TargetDataRTArgs RTArgs,
-                     Value *NumIterations, Value *NumTeams, Value *NumThreads,
+                     Value *TripCount, Value *NumTeams, Value *NumThreads,
                      Value *DynCGGroupMem, bool HasNoWait)
-        : NumTargetItems(NumTargetItems), RTArgs(RTArgs),
-          NumIterations(NumIterations), NumTeams(NumTeams),
-          NumThreads(NumThreads), DynCGGroupMem(DynCGGroupMem),
-          HasNoWait(HasNoWait) {}
+        : NumTargetItems(NumTargetItems), RTArgs(RTArgs), TripCount(TripCount),
+          NumTeams(NumTeams), NumThreads(NumThreads),
+          DynCGGroupMem(DynCGGroupMem), HasNoWait(HasNoWait) {}
   };
 
   /// Create the kernel args vector used by emitTargetKernel. This function
@@ -1956,6 +2073,14 @@ public:
               Value *NumTeamsLower = nullptr, Value *NumTeamsUpper = nullptr,
               Value *ThreadLimit = nullptr, Value *IfExpr = nullptr);
 
+  /// Generator for `#omp distribute`
+  ///
+  /// \param Loc The location where the teams construct was encountered.
+  /// \param AllocaIP The insertion points to be used for alloca instructions.
+  /// \param BodyGenCB Callback that will generate the region code.
+  InsertPointTy createDistribute(const LocationDescription &Loc,
+                                 InsertPointTy AllocaIP,
+                                 BodyGenCallbackTy BodyGenCB);
   /// Generate conditional branch and relevant BasicBlocks through which private
   /// threads copy the 'copyin' variables from Master copy to threadprivate
   /// copies.
@@ -2068,15 +2193,10 @@ public:
   ///
   /// \param Loc The insert and source location description.
   /// \param IsSPMD Flag to indicate if the kernel is an SPMD kernel or not.
-  /// \param MinThreads Minimal number of threads, or 0.
-  /// \param MaxThreads Maximal number of threads, or 0.
-  /// \param MinTeams Minimal number of teams, or 0.
-  /// \param MaxTeams Maximal number of teams, or 0.
-  InsertPointTy createTargetInit(const LocationDescription &Loc, bool IsSPMD,
-                                 int32_t MinThreadsVal = 0,
-                                 int32_t MaxThreadsVal = 0,
-                                 int32_t MinTeamsVal = 0,
-                                 int32_t MaxTeamsVal = 0);
+  /// \param Bounds The default kernel lanuch bounds.
+  InsertPointTy createTargetInit(
+      const LocationDescription &Loc, bool IsSPMD,
+      const llvm::OpenMPIRBuilder::TargetKernelDefaultBounds &Bounds);
 
   /// Create a runtime call for kmpc_target_deinit
   ///
@@ -2101,6 +2221,9 @@ public:
   readThreadBoundsForKernel(const Triple &T, Function &Kernel);
   static void writeThreadBoundsForKernel(const Triple &T, Function &Kernel,
                                          int32_t LB, int32_t UB);
+
+  /// Write the global variable to indicate which amdgcn ABI to use
+  static void emit__oclc_ABI_version(Module &M, int32_t COV);
 
   /// Read/write a bounds on teams for \p Kernel. Read will return 0 if none
   /// is set.
@@ -2176,7 +2299,6 @@ public:
                                          Function *OutlinedFunction,
                                          StringRef EntryFnName,
                                          StringRef EntryFnIDName);
-
   /// Type of BodyGen to use for region codegen
   ///
   /// Priv: If device pointer privatization is required, emit the body of the
@@ -2235,21 +2357,23 @@ public:
   /// Generator for '#omp target'
   ///
   /// \param Loc where the target data construct was encountered.
+  /// \param IsSPMD whether this is an SPMD target launch.
   /// \param CodeGenIP The insertion point where the call to the outlined
   /// function should be emitted.
   /// \param EntryInfo The entry information about the function.
-  /// \param NumTeams Number of teams specified in the num_teams clause.
-  /// \param NumThreads Number of teams specified in the thread_limit clause.
+  /// \param DefaultBounds The default kernel lanuch bounds.
+  /// \param RuntimeBounds The runtime kernel lanuch bounds.
   /// \param Inputs The input values to the region that will be passed.
   /// as arguments to the outlined function.
   /// \param BodyGenCB Callback that will generate the region code.
   /// \param ArgAccessorFuncCB Callback that will generate accessors
   /// instructions for passed in target arguments where neccessary
-  InsertPointTy createTarget(const LocationDescription &Loc,
+  InsertPointTy createTarget(const LocationDescription &Loc, bool IsSPMD,
                              OpenMPIRBuilder::InsertPointTy AllocaIP,
                              OpenMPIRBuilder::InsertPointTy CodeGenIP,
-                             TargetRegionEntryInfo &EntryInfo, int32_t NumTeams,
-                             int32_t NumThreads,
+                             TargetRegionEntryInfo &EntryInfo,
+                             const TargetKernelDefaultBounds &DefaultBounds,
+                             const TargetKernelRuntimeBounds &RuntimeBounds,
                              SmallVectorImpl<Value *> &Inputs,
                              GenMapInfoCallbackTy GenMapInfoCB,
                              TargetBodyGenCallbackTy BodyGenCB,
