@@ -19,19 +19,19 @@ int main(){
 #pragma omp target map(tofrom: sum)
 {
     #pragma omp atomic hint(AMD_safe_fp_atomics)
-    sum+=1.0;
+  sum+=(float)1.0;
 }
 
 #pragma omp target map(tofrom: sum)
 {
     #pragma omp atomic hint(AMD_unsafe_fp_atomics)
-    sum+=1.0;
+  sum+=(float)1.0;
 }
 
 #pragma omp target map(tofrom: sum)
 {
     #pragma omp atomic
-    sum+=1.0;
+  sum+=(float)1.0;
 }
 
     return 1;
@@ -52,7 +52,7 @@ int main(){
 // CHECK-NEXT:    [[EXEC_USER_CODE:%.*]] = icmp eq i32 [[TMP1]], -1
 // CHECK-NEXT:    br i1 [[EXEC_USER_CODE]], label [[USER_CODE_ENTRY:%.*]], label [[WORKER_EXIT:%.*]]
 // CHECK:       user_code.entry:
-// CHECK-NEXT:    [[TMP2:%.*]] = call double @llvm.amdgcn.flat.atomic.fadd.f64.p0.f64(ptr [[TMP0]], double 1.000000e+00) #[[ATTR2:[0-9]+]]
+// CHECK-NEXT:    [[TMP2:%.*]] = call float @llvm.amdgcn.flat.atomic.fadd.f32.p0.f32(ptr [[TMP0]], float 1.000000e+00) #[[ATTR2:[0-9]+]]
 // CHECK-NEXT:    call void @__kmpc_target_deinit()
 // CHECK-NEXT:    ret void
 // CHECK:       worker.exit:
@@ -73,7 +73,7 @@ int main(){
 // CHECK-NEXT:    [[EXEC_USER_CODE:%.*]] = icmp eq i32 [[TMP1]], -1
 // CHECK-NEXT:    br i1 [[EXEC_USER_CODE]], label [[USER_CODE_ENTRY:%.*]], label [[WORKER_EXIT:%.*]]
 // CHECK:       user_code.entry:
-// CHECK-NEXT:    [[TMP2:%.*]] = call double @llvm.amdgcn.flat.atomic.fadd.f64.p0.f64(ptr [[TMP0]], double 1.000000e+00) #[[ATTR2]]
+// CHECK-NEXT:    [[TMP2:%.*]] = call float @llvm.amdgcn.flat.atomic.fadd.f32.p0.f32(ptr [[TMP0]], float 1.000000e+00) #[[ATTR2]]
 // CHECK-NEXT:    call void @__kmpc_target_deinit()
 // CHECK-NEXT:    ret void
 // CHECK:       worker.exit:
@@ -94,7 +94,7 @@ int main(){
 // CHECK-NEXT:    [[EXEC_USER_CODE:%.*]] = icmp eq i32 [[TMP1]], -1
 // CHECK-NEXT:    br i1 [[EXEC_USER_CODE]], label [[USER_CODE_ENTRY:%.*]], label [[WORKER_EXIT:%.*]]
 // CHECK:       user_code.entry:
-// CHECK-NEXT:    [[TMP2:%.*]] = call double @llvm.amdgcn.flat.atomic.fadd.f64.p0.f64(ptr [[TMP0]], double 1.000000e+00) #[[ATTR2]]
+// CHECK-NEXT:    [[TMP2:%.*]] = call float @llvm.amdgcn.flat.atomic.fadd.f32.p0.f32(ptr [[TMP0]], float 1.000000e+00) #[[ATTR2]]
 // CHECK-NEXT:    call void @__kmpc_target_deinit()
 // CHECK-NEXT:    ret void
 // CHECK:       worker.exit:
