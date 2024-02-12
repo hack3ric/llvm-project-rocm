@@ -1623,6 +1623,15 @@ private:
   /// or positively querying the stream.
   Error complete() {
     for (uint32_t Slot = 0; Slot < NextSlot; ++Slot) {
+      //#if 0
+      if (Slots[Slot].Signal->load() > 0) {
+       printf("Error: slot signal should be 0\n");
+       for(uint32_t T = Slot; T < NextSlot; ++T) {
+         printf("WIP on slot %d, value = %d\n", T, Slots[T].Signal->load());
+       }
+       assert(false);
+      }
+      //#endif
       // Take the post action of the operation if any.
       if (auto Err = Slots[Slot].performAction())
         return Err;
