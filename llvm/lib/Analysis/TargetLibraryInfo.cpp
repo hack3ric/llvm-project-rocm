@@ -42,9 +42,7 @@ static cl::opt<TargetLibraryInfoImpl::VectorLibrary> ClVectorLibrary(
                clEnumValN(TargetLibraryInfoImpl::SLEEFGNUABI, "sleefgnuabi",
                           "SIMD Library for Evaluating Elementary Functions"),
                clEnumValN(TargetLibraryInfoImpl::ArmPL, "ArmPL",
-                          "Arm Performance Libraries"),
-               clEnumValN(TargetLibraryInfoImpl::AMDLIBM, "AMDLIBM",
-                          "AMD vector math library")));
+                          "Arm Performance Libraries")));
 
 StringLiteral const TargetLibraryInfoImpl::StandardNames[LibFunc::NumLibFuncs] =
     {
