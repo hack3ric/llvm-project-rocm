@@ -132,7 +132,8 @@ public:
     AMDLIBM,    // AMD Math Vector library.
 // end AOCC
     SLEEFGNUABI, // SLEEF - SIMD Library for Evaluating Elementary Functions.
-    ArmPL        // Arm Performance Libraries.
+    ArmPL,       // Arm Performance Libraries.
+    AMDLIBM      // AMD Math Vector library.
   };
 
   TargetLibraryInfoImpl();
